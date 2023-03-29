@@ -76,12 +76,20 @@ class Transformer(nn.Module):
         return x
 
 
-class NumericalEmbedder(nn.Module):
-    def __init__(self, dim, num_numerical_types):
+class SimpleTableTransformer(torch.nn.Module):
+    def __init__(self, *, dim, heads, dim_head = 16, dim_out = 1, attn_dropout = 0., ff_dropout = 0., table):
         super().__init__()
-        self.weights = nn.Parameter(torch.randn(num_numerical_types, dim))
-        self.biases = nn.Parameter(torch.randn(num_numerical_types, dim))
+        self.dim = dim
 
-    def forward(self, x):
-        x = rearrange(x, 'b n -> b n 1')
-        return x * self.weights + self.biases
+        # transformer
+        self.transformer = Transformer(dim, heads, dim_head, attn_dropout, ff_dropout)
+        self.table = table
+
+        self.linear_cls = torch.nn.Sequential(torch.nn.LayerNorm(dim), torch.nn.ReLU(), torch.nn.Linear(dim, dim_out))
+        # self.to_logits = torch.nn.Sequential(torch.nn.LayerNorm(dim), torch.nn.ReLU(), torch.nn.Linear(dim, dim))
+
+    def forward(self, keys, x):
+        x = torch.cat((keys, x), dim=1)
+        x = self.transformer(x)
+
+        return [self.linear_cls(x[:, :keys.shape[1]]), x[:, keys.shape[1]:]]
