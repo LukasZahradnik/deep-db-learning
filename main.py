@@ -17,7 +17,7 @@ def train():
     epochs = 1000
 
     dim = 32
-    dim_out = 4
+    dim_out = 9
     heads = 2
     layers = 4
     attn_dropout = 0.1

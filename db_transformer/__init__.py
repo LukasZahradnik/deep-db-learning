@@ -10,18 +10,42 @@ from db_transformer.transformer import SimpleTableTransformer
 from db_transformer.data import TableData
 
 
+class MyMLP(torch.nn.Module):
+    def __init__(self, *, dim, heads, dim_head = 16, dim_out = 1, attn_dropout = 0., ff_dropout = 0., table):
+        super().__init__()
+        self.dim = dim
+
+        self.seq = torch.nn.Sequential(
+            torch.nn.Linear(dim, dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(dim, dim)
+        )
+
+    def forward(self, keys, x):
+        x = torch.cat((keys, x), dim=1)
+        shape = x.shape
+        x = rearrange(x, "a b c -> a (b c)")
+        x = self.seq(x)
+
+        x = x.reshape(shape)
+        x[:, 0, :] = torch.sum(x, dim=1)
+
+        return [x[:, :keys.shape[1]], x[:, keys.shape[1]:]]
+
+
 class DBTransformer(torch.nn.Module):
-    def __init__(self, metadata, dim: int, dim_out: int, heads: int, attn_dropout: float, ff_dropout: float, tables, layers: int):
+    def __init__(self, metadata, dim: int, dim_out: int, heads: int, attn_dropout: float, ff_dropout: float, tables: List[TableData], layers: int):
         super().__init__()
 
-        self.tables = tables
+        self.tables: List[TableData] = tables
         self.dim = dim
+
         self.embedder = [ColumnEmbedder(table.categories, table.num_continuous, dim) for table in tables]
 
         self.layers = torch.nn.ModuleList([
             torch.nn.ModuleList([
-                SimpleTableTransformer(
-                    dim=dim,
+                MyMLP(
+                    dim=(table.num_continuous + len(table.categories) + len(table.keys) + 1) * dim,
                     dim_out=dim,
                     heads=heads,
                     attn_dropout=attn_dropout,
@@ -69,7 +93,7 @@ class DBTransformer(torch.nn.Module):
 
                 for key_index, (table_name, column) in zip(table_inst.key_index, table_inst.keys):
                     key = f"{table}_{table_name}_{column}"
-                    hetero_data[key].x = x[0][:, 0, :] #.clone()
+                    hetero_data[key].x = x[0][:, 0, :]
 
             out = message_passing(hetero_data.x_dict, hetero_data.edge_index_dict)
 

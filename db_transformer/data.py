@@ -80,7 +80,7 @@ class TableData:
 
         for i, row in enumerate(processed_data):
             numeric = [row[x] for x in self.num_index]
-            numeric.extend(0.0 for _ in self.key_index)
+            # numeric.extend(0.0 for _ in self.key_index)
 
             if self.primary_key != -1:
                 key_indexing[self.name][row[self.primary_key]] = i

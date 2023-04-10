@@ -85,11 +85,11 @@ class SimpleTableTransformer(torch.nn.Module):
         self.transformer = Transformer(dim, heads, dim_head, attn_dropout, ff_dropout)
         self.table = table
 
-        self.linear_cls = torch.nn.Sequential(torch.nn.LayerNorm(dim), torch.nn.ReLU(), torch.nn.Linear(dim, dim_out))
+        # self.linear_cls = torch.nn.Sequential(torch.nn.LayerNorm(dim), torch.nn.ReLU(), torch.nn.Linear(dim, dim))
         # self.to_logits = torch.nn.Sequential(torch.nn.LayerNorm(dim), torch.nn.ReLU(), torch.nn.Linear(dim, dim))
 
     def forward(self, keys, x):
         x = torch.cat((keys, x), dim=1)
         x = self.transformer(x)
 
-        return [self.linear_cls(x[:, :keys.shape[1]]), x[:, keys.shape[1]:]]
+        return [x[:, :keys.shape[1]], x[:, keys.shape[1]:]]
