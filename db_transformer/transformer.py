@@ -77,7 +77,7 @@ class Transformer(nn.Module):
 
 
 class SimpleTableTransformer(torch.nn.Module):
-    def __init__(self, *, dim, heads, dim_head = 16, dim_out = 1, attn_dropout = 0., ff_dropout = 0., table):
+    def __init__(self, *, dim, heads, dim_head = 16, attn_dropout = 0., ff_dropout = 0., table = None):
         super().__init__()
         self.dim = dim
 

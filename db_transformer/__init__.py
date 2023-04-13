@@ -11,7 +11,7 @@ from db_transformer.data import TableData
 
 
 class MyMLP(torch.nn.Module):
-    def __init__(self, *, dim, heads, dim_head = 16, dim_out = 1, attn_dropout = 0., ff_dropout = 0., table):
+    def __init__(self, *, dim):
         super().__init__()
         self.dim = dim
 
@@ -34,7 +34,7 @@ class MyMLP(torch.nn.Module):
 
 
 class DBTransformer(torch.nn.Module):
-    def __init__(self, metadata, dim: int, dim_out: int, heads: int, attn_dropout: float, ff_dropout: float, tables: List[TableData], layers: int):
+    def __init__(self, dim: int, dim_out: int, transformer_func, gnn_func, tables: List[TableData], layers: int):
         super().__init__()
 
         self.tables: List[TableData] = tables
@@ -43,21 +43,11 @@ class DBTransformer(torch.nn.Module):
         self.embedder = [ColumnEmbedder(table.categories, table.num_continuous, dim) for table in tables]
 
         self.layers = torch.nn.ModuleList([
-            torch.nn.ModuleList([
-                MyMLP(
-                    dim=(table.num_continuous + len(table.categories) + len(table.keys) + 1) * dim,
-                    dim_out=dim,
-                    heads=heads,
-                    attn_dropout=attn_dropout,
-                    ff_dropout=ff_dropout,
-                    table=table
-                ) for table in tables
-            ]) for _ in range(layers)
+            torch.nn.ModuleList([transformer_func(dim, table) for table in tables]) for _ in range(layers)
         ])
 
         self.message_passing = torch.nn.ModuleList([
-            torch_geometric.nn.to_hetero(torch_geometric.nn.GraphSAGE(dim, dim, 1), metadata, aggr="mean")
-            for _ in range(layers)
+            gnn_func(dim) for _ in range(layers)
         ])
 
         self.to_logits = torch.nn.Sequential(

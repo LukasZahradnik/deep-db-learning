@@ -1,7 +1,8 @@
 import torch
+import torch_geometric
 import torch_geometric.transforms as T
 
-from db_transformer import DBTransformer
+from db_transformer import DBTransformer, MyMLP, SimpleTableTransformer
 from db_transformer.data import DataLoader
 
 torch.manual_seed(1)
@@ -27,7 +28,27 @@ def train():
     hetero_data = T.ToUndirected()(hetero_data)
     hetero_data = T.AddSelfLoops()(hetero_data)
 
-    transformer = DBTransformer(hetero_data.metadata(), dim, dim_out, heads, attn_dropout, ff_dropout, table_data, layers)
+
+    def my_mlp(dim_in, table):
+        return MyMLP(
+            dim=(table.num_continuous + len(table.categories) + len(table.keys) + 1) * dim_in,
+        )
+
+    def my_transformer(dim_in, table):
+        return SimpleTableTransformer(
+            dim=dim_in,
+            heads=heads,
+            attn_dropout=attn_dropout,
+            ff_dropout=ff_dropout,
+            table=table,
+        )
+
+    metadata = hetero_data.metadata()
+
+    def my_gsage(dim_in):
+        return torch_geometric.nn.to_hetero(torch_geometric.nn.GraphSAGE(dim_in, dim_in, 1), metadata, aggr="mean")
+
+    transformer = DBTransformer(dim, dim_out, my_mlp, my_gsage, table_data, layers)
 
     print(transformer)
 
