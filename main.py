@@ -8,13 +8,9 @@ from db_transformer.data import DataLoader
 torch.manual_seed(1)
 
 
+
+
 def train():
-    target_table = "molecule"
-
-    print("Getting tables")
-    data_loader = DataLoader("./dataset/mutag")
-    table_data, hetero_data, labels = data_loader.load(target_table)
-
     epochs = 1000
 
     dim = 32
@@ -23,11 +19,6 @@ def train():
     layers = 4
     attn_dropout = 0.1
     ff_dropout = 0.1
-
-
-    hetero_data = T.ToUndirected()(hetero_data)
-    hetero_data = T.AddSelfLoops()(hetero_data)
-
 
     def my_mlp(dim_in, table):
         return MyMLP(
@@ -43,12 +34,17 @@ def train():
             table=table,
         )
 
-    metadata = hetero_data.metadata()
+
+    target_table = "target"
+
+    print("Getting tables")
+    data_loader = DataLoader("./dataset/mutag", 300)
+    data_loader.load_data_loader("./dbs/f1", target_table)
 
     def my_gsage(dim_in):
-        return torch_geometric.nn.to_hetero(torch_geometric.nn.GraphSAGE(dim_in, dim_in, 1), metadata, aggr="mean")
+        return torch_geometric.nn.to_hetero(torch_geometric.nn.GraphSAGE(dim_in, dim_in, 1), data_loader.metadata, aggr="mean")
 
-    transformer = DBTransformer(dim, dim_out, my_mlp, my_gsage, table_data, layers)
+    transformer = DBTransformer(dim, dim_out, my_mlp, my_gsage, data_loader.tables, layers)
 
     print(transformer)
 
@@ -56,23 +52,30 @@ def train():
     loss_fn = torch.nn.CrossEntropyLoss()
 
     for i in range(epochs):
-        x = transformer(table_data, hetero_data, target_table)
+        for index in range(data_loader.len):
+            table_data, hetero_data, labels = data_loader.load(index, target_table)
 
-        loss = loss_fn(x, labels)
-        print(i, "Loss: ", loss)
+            hetero_data = T.ToUndirected()(hetero_data)
+            hetero_data = T.AddSelfLoops()(hetero_data)
+            metadata = hetero_data.metadata()
 
-        optim.zero_grad(set_to_none=True)
-        loss.backward()
+            x = transformer(table_data, hetero_data, target_table)
 
-        optim.step()
+            loss = loss_fn(x, labels)
+            print(i, "Loss: ", loss)
 
-        if i % 10 == 0:
-            s = 0
-            lab = torch.argmax(x, dim=1)
-            for r, p in zip(labels, lab):
-                if r == p:
-                    s += 1
-            print(s, len(labels))
+            optim.zero_grad(set_to_none=True)
+            loss.backward()
+
+            optim.step()
+
+            if i % 10 == 0:
+                s = 0
+                lab = torch.argmax(x, dim=1)
+                for r, p in zip(labels, lab):
+                    if r == p:
+                        s += 1
+                print(s, len(labels))
 
 
 train()
