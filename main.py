@@ -37,11 +37,11 @@ def train():
 
     layers = 2
     label_index = -1
-    target_table = "inspections"
+    target_table = "molecule"
 
     print("Getting tables")
-    data_loader = DataLoader("./dataset/sfscores", 200, layers, torch.float, 19011)  # 150) #19011)
-    data_loader.load_data_loader("./dbs/sfscores", target_table)
+    data_loader = DataLoader("./dataset/mutag", 200, layers, torch.float, 150) # 150) #19011)
+    data_loader.load_data_loader("./dbs/mutag", target_table)
 
     print(data_loader.metadata[0])
     print("===")
