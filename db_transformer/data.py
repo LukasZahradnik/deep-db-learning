@@ -111,7 +111,7 @@ class TableData:
             x_numer.append(numeric)
 
         self.x_numer = torch.tensor(x_numer)
-        self.x_cat = torch.tensor(x_categ, device=torch.device('cuda'), dtype=torch.long)
+        self.x_cat = torch.tensor(x_categ, dtype=torch.long)
 
     def add_foreign_keys(self, hetero_data: HeteroData, preprocessed_data, key_indexing) -> HeteroData:
         edge_indices = [[] for _ in self.key_index]

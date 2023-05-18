@@ -1,22 +1,24 @@
 import torch
-import torch_geometric
 import torch_geometric.transforms as T
 
 from db_transformer import DBTransformer, MyMLP, SimpleTableTransformer
 from db_transformer.data import DataLoader
 from db_transformer.gnn import MyHeteroGNN
 
+from torchmetrics.classification import MulticlassAccuracy
+
 torch.manual_seed(1)
 
-device = torch.device('cuda')
-torch.set_default_tensor_type('torch.cuda.FloatTensor')
+
+# device = torch.device('cuda')
+# torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 
 def train():
     epochs = 1000
 
     dim = 32
-    dim_out = 1
+    dim_out = 2
     heads = 1
     attn_dropout = 0.1
     ff_dropout = 0.1
@@ -40,7 +42,7 @@ def train():
     target_table = "molecule"
 
     print("Getting tables")
-    data_loader = DataLoader("./dataset/mutag", 200, layers, torch.float, 150) # 150) #19011)
+    data_loader = DataLoader("./dataset/mutag", 200, layers, torch.long, 150) # 150) #19011)
     data_loader.load_data_loader("./dbs/mutag", target_table)
 
     print(data_loader.metadata[0])
@@ -79,6 +81,27 @@ def train():
             loss.backward()
 
             optim.step()
+        if i % 1 == 0 and i != 0:
+            with torch.no_grad():
+                tlabels = None
+                tpred = None
+
+                for index in range(data_loader.test_len):
+                    table_data, hetero_data, labels = data_loader.load(index, target_table, label_index, False)
+
+                    hetero_data = T.ToUndirected()(hetero_data)
+                    hetero_data = T.AddSelfLoops()(hetero_data)
+
+                    x = transformer(table_data, hetero_data, target_table)
+
+                    if tlabels is None:
+                        tlabels = labels
+                        tpred = x
+                    else:
+                        tlabels = torch.concat((tlabels, labels))
+                        tpred = torch.concat((tpred, x))
+                metric = MulticlassAccuracy(num_classes=2)
+                print("Acc", metric(tpred.squeeze(), tlabels))
 
 
 train()
