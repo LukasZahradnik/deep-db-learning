@@ -22,7 +22,10 @@ class MyMLP(torch.nn.Module):
         )
 
     def forward(self, keys, x):
-        x = torch.cat((keys, x), dim=1)
+        if x is not None:
+            x = torch.cat((keys, x), dim=1)
+        else:
+            x = keys
         shape = x.shape
         x = rearrange(x, "a b c -> a (b c)")
         x = self.seq(x)
@@ -63,27 +66,34 @@ class DBTransformer(torch.nn.Module):
 
         def get_init_keys(tdata):
             if tdata.x_keys:
-                return torch.zeros((max(len(tdata.x_cat), len(tdata.x_numer)), len(tdata.x_keys), self.dim))
+                n = len(tdata.x_cat) if tdata.x_cat is not None else 0
+                m = len(tdata.x_numer) if tdata.x_numer is not None else 0
+
+                return torch.zeros((max(n, m), len(tdata.x_keys), self.dim))
             return None
 
         xs = {
-            table.name: [get_init_keys(table), embedder(table_data.x_cat, table_data.x_numer)]
-            for table_data, embedder, table in zip(table_data, self.embedder, self.tables)
+            table.name: [get_init_keys(tt), embedder(tt.x_cat, tt.x_numer)]
+            for tt, embedder, table in zip(table_data, self.embedder, self.tables) if not tt.empty
         }
 
         for layer, message_passing in zip(self.layers, self.message_passing):
             xs = {
                 table.name: model(*xs[table.name])
-                for model, table in zip(layer, self.tables)
+                for model, table in zip(layer, table_data) if not table.empty
             }
 
             for table, x in xs.items():
                 table_inst = table_data[table_to_int[table]]
-                hetero_data[table].x = x[0][:, 0, :].clone()
+                hetero_data[table].x = x[0][:, 0, :]
 
-                for key_index, (table_name, column) in zip(table_inst.key_index, table_inst.keys):
-                    key = f"{table}_{table_name}_{column}"
-                    hetero_data[key].x = x[0][:, 0, :]
+                # print(table, hetero_data[table].x)
+                # for key_index, (table_name, column) in zip(table_inst.key_index, table_inst.keys):
+                #    hetero_data[table_name].x = x[0][:, 0, :]
+
+            for k in hetero_data.edge_index_dict.keys():
+                if hetero_data[k].edge_index.shape == (2, 0):
+                    del hetero_data[k]
 
             out = message_passing(hetero_data.x_dict, hetero_data.edge_index_dict)
 
@@ -97,11 +107,13 @@ class DBTransformer(torch.nn.Module):
 
                 for i, (table_name, column) in enumerate(table_inst.keys):
                     key = f"{table}_{table_name}_{column}"
-                    newx.append(out[key])
+                    if out[key]:
+                        newx.append(out[key])
+                    else:
+                        newx.append(x[0][:, i + 1])
 
                 newx = [rearrange(xx, "b n -> b 1 n") for xx in newx]
                 x[0] = torch.cat(newx, dim=1)
-
 
         x = xs[output_table][0][:, 0, :]
         x = self.to_logits(x)

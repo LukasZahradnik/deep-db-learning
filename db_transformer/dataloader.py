@@ -4,16 +4,17 @@ import json
 
 
 class DBDataLoader:
-    def __init__(self, schema_path: str, batch_size: int):
+    def __init__(self, schema_path: str, batch_size: int, max_depth: int):
         with open(schema_path, mode="r") as fp:
             self.schema = json.load(fp)
 
         self.selects = []
 
         self.processed = {}
-        self.max_depth = 3
+        self.max_depth = max_depth
         self.batch_size = batch_size
 
+        self.test_batches = []
         self.batches = []
 
     def get_keys(self, data, index):
@@ -26,7 +27,7 @@ class DBDataLoader:
 
             data[i] = tuple(dd)
 
-    def load(self, con, table: str, index: int):
+    def load(self, con, table: str, index: int, limit, offset, train=True):
         queue = [(table, 0, None, None, None)]
         root = None
 
@@ -39,7 +40,7 @@ class DBDataLoader:
                 return root
 
             if root is None:
-                data = con.execute(f"SELECT * FROM {t} LIMIT {self.batch_size} OFFSET {index * self.batch_size};")
+                data = con.execute(f"SELECT * FROM {t} LIMIT {limit} OFFSET {offset};")
                 data = data.fetchall()
 
                 if not data:
@@ -49,6 +50,7 @@ class DBDataLoader:
                 table_data[t] = set(data)
             else:
                 k = set(keys)
+
                 data = con.execute(f"SELECT * FROM {t} WHERE {key} IN ({ ','.join('?' * len(k))});", list(k))
                 data = data.fetchall()
 
@@ -68,16 +70,20 @@ class DBDataLoader:
             foreigns = set()
             for i, (key, info) in enumerate(self.schema[t].items()):
                 if info.get("type") == "foreign_key":
-                    queue.append((info.get("table"), depth + 1, table, key, self.get_keys(table_data[t], i)))
+                    queue.append((info.get("table"), depth + 1, t, info.get("column"), self.get_keys(table_data[t], i)))
                     foreigns.add(info.get("table"))
 
+            pkeys = self.get_keys(table_data[t], 0)
             for next_table in self.schema:
                 if next_table in foreigns or (parent is not None and next_table == parent):
                     continue
 
                 for i, (key, info) in enumerate(self.schema[next_table].items()):
                     if info.get("type") == "foreign_key" and info.get("table") == t:
-                        queue.append((next_table, depth + 1, table, key, self.get_keys(table_data[t], i)))
+                        queue.append((next_table, depth + 1, t, key, pkeys))
 
-        self.batches.append(table_data)
+        if train:
+            self.batches.append(table_data)
+        else:
+            self.test_batches.append(table_data)
         return True

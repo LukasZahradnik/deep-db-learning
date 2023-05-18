@@ -9,6 +9,8 @@ class NumericalEmbedder(torch.nn.Module):
         self.biases = torch.nn.Parameter(torch.randn(num_numerical_types, dim))
 
     def forward(self, x):
+        if x.shape[0] == 0:
+            return x
         x = rearrange(x, 'b n -> b n 1')
         return x * self.weights + self.biases
 
@@ -24,12 +26,12 @@ class ColumnEmbedder(torch.nn.Module):
 
         # create category embeddings table
         self.num_special_tokens = num_special_tokens
-        total_tokens = self.num_unique_categories + num_special_tokens
+        self.total_tokens = self.num_unique_categories + num_special_tokens
 
         # for automatically offsetting unique category ids to the correct position in the categories embedding table
         if self.num_unique_categories > 0:
             # categorical embedding
-            self.categorical_embeds = torch.nn.Embedding(total_tokens + 10, dim)
+            self.categorical_embeds = torch.nn.Embedding(self.total_tokens + 10, dim)
 
         # continuous
         self.num_continuous = num_continuous
@@ -39,6 +41,7 @@ class ColumnEmbedder(torch.nn.Module):
 
     def forward(self, x_categ, x_numer):
         xs = []
+
         if self.num_unique_categories > 0:
             x_categ = self.categorical_embeds(x_categ)
             xs.append(x_categ)
@@ -48,4 +51,6 @@ class ColumnEmbedder(torch.nn.Module):
             x_numer = self.numerical_embedder(x_numer)
             xs.append(x_numer)
 
-        return torch.cat(xs, dim=1)
+        if xs:
+            return torch.cat(xs, dim=1)
+        return None

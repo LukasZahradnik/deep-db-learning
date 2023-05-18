@@ -89,7 +89,10 @@ class SimpleTableTransformer(torch.nn.Module):
         # self.to_logits = torch.nn.Sequential(torch.nn.LayerNorm(dim), torch.nn.ReLU(), torch.nn.Linear(dim, dim))
 
     def forward(self, keys, x):
-        x = torch.cat((keys, x), dim=1)
+        if x is not None:
+            x = torch.cat((keys, x), dim=1)
+        else:
+            x = keys
         x = self.transformer(x)
 
         return [x[:, :keys.shape[1]], x[:, keys.shape[1]:]]
