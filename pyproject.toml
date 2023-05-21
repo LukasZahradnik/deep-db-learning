@@ -1,0 +1,13 @@
+[project]
+dependencies = [
+    "attrs >= 23.1.0",
+]
+
+[project.optional-dependencies]
+tests = [
+    "pytest >= 7.3.1"
+]
+
+[pytest]
+testpaths = "tests"
+
