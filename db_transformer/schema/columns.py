@@ -24,12 +24,6 @@ class ForeignKeyColumnDef:
     key: bool = field(default=False, validator=attrs.validators.instance_of(bool))
     """Whether the column is part of the table's primary key"""
 
-    table: str = field(validator=attrs.validators.instance_of(str))
-    """The name of the table which this foreign key refers to"""
-
-    column: str = field(validator=attrs.validators.instance_of(str))
-    """The name of the primary key column of the referred table"""
-
 
 @named_column_def('cat')
 @define(kw_only=True)
@@ -64,4 +58,7 @@ class OmitColumnDef:
     """
     Column definition that marks the column as to be ignored by the machine learning pipeline.
     """
-    pass
+
+    key: bool = field(default=False, validator=attrs.validators.instance_of(bool))
+    """Whether the column is part of the table's primary key"""
+

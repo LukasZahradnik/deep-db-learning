@@ -1,4 +1,5 @@
-from typing import Any, Dict, Type, TypeVar, Union
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union
+from attrs import define, field
 import warnings
 
 from db_transformer.helpers.objectpickle import (
@@ -14,6 +15,8 @@ __all__ = [
     'named_column_def',
     'ColumnDefSerializer',
     'ColumnDefDeserializer',
+    'ColumnDefs',
+    'ForeignKeyDef',
     'TableSchema',
     'Schema'
 ]
@@ -55,7 +58,8 @@ class ColumnDefSerializer(TypedSerializer):
 
     def __init__(self):
         super().__init__(
-            delegate_serializer=SimpleSerializer(child_serializer=TypedSerializer()),  # not self - delegate to default behavior for children
+            # not self - delegate to default behavior for children
+            delegate_serializer=SimpleSerializer(child_serializer=TypedSerializer()),
             type_key='type')
 
     def _get_type(self, cls: Type) -> Any:
@@ -77,7 +81,7 @@ class ColumnDefDeserializer(TypedDeserializer):
 
     def __init__(self):
         super().__init__(
-            child_deserializer=TypedDeserializer(), # not self - delegate to default behavior for children
+            child_deserializer=TypedDeserializer(),  # not self - delegate to default behavior for children
             type_key='type')
 
     def _get_class(self, type: Any) -> Type:
@@ -89,25 +93,62 @@ class ColumnDefDeserializer(TypedDeserializer):
         return super()._get_class(type)
 
 
-class TableSchema(DotDict):
+class ColumnDefs(DotDict[Any]):
     """
-    Represents the schema of one table.
+    Represents the column definitions of one table.
     It is basically a dictionary of column_name -> `ColumnDef`.
     """
+    SERIALIZER = ColumnDefSerializer()
+    DESERIALIZER = ColumnDefDeserializer()
+
+    def __setitem__(self, key: str, value: Any):
+        return super().__setitem__(key, self.DESERIALIZER(value) if isinstance(value, dict) else value)
 
     def __getstate__(self) -> object:
         # let's do the serialization of the type ourselves to make it a little nicer
 
-        serializer = ColumnDefSerializer()
         return {
-            k: serializer(v) for k, v in self.items()
+            k: self.SERIALIZER(v) for k, v in self.items()
         }
 
     def __setstate__(self, state: dict):
-        deserializer = ColumnDefDeserializer()
         for k, v in state.items():
-            self[k] = deserializer(v)
-        
+            self[k] = self.DESERIALIZER(v)
+
+
+@define()
+class ForeignKeyDef:
+    """
+    Represents one foreign key.
+    """
+
+    columns: List[str] = field(converter=list)
+    """
+    The referencing columns (in this table)
+    """
+
+    ref_table: str
+    """
+    The referenced table name
+    """
+
+    ref_columns: List[str] = field(converter=list)
+    """
+    The referenced columns (in the referenced table)
+    """
+
+
+@define()
+class TableSchema:
+    """
+    Represents the schema of a single DB table.
+    Holds information about the table columns as well as foreign keys.
+    """
+
+    columns: ColumnDefs = field(converter=ColumnDefs)
+    foreign_keys: List[ForeignKeyDef] = field(
+        converter=lambda vs: [deserialize(v, ForeignKeyDef) if isinstance(v, dict) else v for v in vs],
+        repr=lambda fks: '[\n' + '\n'.join(['    ' + str(fk) for fk in fks]) + '\n]' if fks else '[]')
 
 class Schema(DotDict[TableSchema]):
     """
@@ -115,8 +156,11 @@ class Schema(DotDict[TableSchema]):
     It is basically a dictionary of table_name -> `TableSchema`.
     """
 
+    def __setitem__(self, key: str, value: Any):
+        return super().__setitem__(key, deserialize(value, TableSchema) if isinstance(value, dict) else value)
+
     def __getstate__(self) -> object:
-        # no need to serialize the internal state with extra type info 
+        # no need to serialize the internal state with extra type info
         # because we know that all types are `TableSchema` :)
         simple_serializer = SimpleSerializer()
         return {
@@ -126,4 +170,4 @@ class Schema(DotDict[TableSchema]):
     def __setstate__(self, state: dict):
         # deserialize each as TableSchema
         for k, v in state.items():
-           self[k] = deserialize(v, type=TableSchema)
+            self[k] = deserialize(v, type=TableSchema)
