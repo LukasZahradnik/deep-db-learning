@@ -4,6 +4,9 @@ from typing import Dict, Generic, Optional, TypeVar, Union
 
 _Value = TypeVar('_Value')
 
+__all__ = [
+    'DotDict'
+]
 
 class DotDict(Generic[_Value], Mapping[str, _Value]):
     """

@@ -1,4 +1,5 @@
 [project]
 dependencies = [
     "attrs >= 23.1.0",
+    "sqlalchemy >= 2.0.0",
 ]
