@@ -18,7 +18,7 @@
   "atom": {
     "atom_id": {
       "type": "num",
-      "key": "true"
+      "key": true
     },
     "molecule_id": {
       "type": "foreign_key",
@@ -40,7 +40,7 @@
   "molecule": {
     "molecule_id": {
       "type": "num",
-      "key": "true"
+      "key": true
     },
     "ind1": {
       "type": "cat",

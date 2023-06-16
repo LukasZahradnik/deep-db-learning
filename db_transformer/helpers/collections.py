@@ -1,5 +1,5 @@
-from collections.abc import Callable, Mapping
-from typing import Any, Dict, Generic, Optional, TypeVar, Union
+from collections.abc import Mapping
+from typing import Dict, Generic, Optional, TypeVar, Union
 
 
 _Value = TypeVar('_Value')
@@ -14,10 +14,21 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
     This is not the case for traditional python `dict`.
     """
 
+    def __new__(cls, *kargs, **kwargs) -> 'DotDict[_Value]':
+        out = super().__new__(cls)
+        object.__setattr__(out, '_DotDict__data', {})
+        return out
+
     def __init__(self, __items: Optional[Union['DotDict[_Value]', Dict[str, _Value]]] = None, /, **kwargs: _Value):
         self.__data: Dict[str, _Value]
-        object.__setattr__(self, '_DotDict__data', {})
         self.update(__items, **kwargs)
+
+    def __getstate__(self) -> dict:
+        return dict(self)
+
+    def __setstate__(self, state: dict):
+        for k, v in state.items():
+            self[k] = v
 
     def update(self, __items: Optional[Union['DotDict[_Value]', Dict[str, _Value]]] = None, /, **kwargs: _Value):
         ndata = {}
@@ -74,18 +85,3 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
 
     def __str__(self) -> str:
         return self.__repr__()
-
-
-class TypeCheckedDotDict(DotDict[_Value], Generic[_Value]):
-    """
-    A `DotDict` that is also type-checked or type-casted. 
-    Type-checking / type-casting is performed by the `__mapping` argument passed in the constructor as the first positional argument.
-    """
-
-    def __init__(self, __mapping: Callable[[Any], _Value], __items: Optional[Union['DotDict[Any]', Dict[str, Any]]] = None, /, **kwargs: _Value):
-        self.__mapping: Callable[[Any], _Value]
-        object.__setattr__(self, '_TypeCheckedDotDict__mapping', __mapping)
-        super().__init__(__items, **kwargs)
-
-    def __setitem__(self, key: str, value: _Value):
-        return super().__setitem__(key, self.__mapping(value))
