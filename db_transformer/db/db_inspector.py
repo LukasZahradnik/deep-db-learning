@@ -1,15 +1,18 @@
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import (
+    Any,
     Dict,
     FrozenSet,
     Optional,
     Set,
     Tuple,
+    Type,
 )
 
 import sqlalchemy
 from sqlalchemy.engine import Engine
+from sqlalchemy.schema import ForeignKeyConstraint, Table
 from sqlalchemy.types import TypeEngine
 from sqlalchemy.ext.automap import automap_base
 
@@ -17,7 +20,7 @@ from db_transformer.helpers.collections.set_filter import SetFilterProtocol
 from db_transformer.schema.schema import ForeignKeyDef
 
 
-class EngineWrapperInterface(ABC):
+class DBInspectorInterface(ABC):
     @property
     @abstractmethod
     def engine(self) -> Engine:
@@ -48,7 +51,7 @@ class EngineWrapperInterface(ABC):
         ...
 
 
-class EngineWrapper(EngineWrapperInterface):
+class DBInspector(DBInspectorInterface):
     def __init__(self,
                  engine: Engine,
                  table_filter: Optional[SetFilterProtocol[str]] = None,
@@ -59,15 +62,45 @@ class EngineWrapper(EngineWrapperInterface):
         self._table_filter = table_filter
         self._column_filters = column_filters if column_filters is not None else {}
 
-        self._automap_base = automap_base()
-        self._automap_base.prepare(autoload_with=engine)
+        # self._automap_base = automap_base()
+
+        # def name_for_scalar_relationship(base: Type[Any], local_cls: Type[Any],
+        #                                  referred_cls: Type[Any], constraint: ForeignKeyConstraint):
+        #     out = '_'.join([c.name for c in constraint.columns]) + "_" + referred_cls.__name__.lower()
+        #     return out
+
+
+        # def name_for_collection_relationship(base: Type[Any], local_cls: Type[Any],
+        #                                  referred_cls: Type[Any], constraint: ForeignKeyConstraint):
+        #     out = '_'.join([c.name for c in constraint.columns]) + "_" + referred_cls.__name__.lower()
+        #     return out
+
+        # self._automap_base.prepare(autoload_with=engine,
+        #                            name_for_scalar_relationship=name_for_scalar_relationship,
+        #                            name_for_collection_relationship=name_for_collection_relationship)
 
     @property
     def engine(self) -> Engine:
         return self._engine
 
     def get_orm_table(self, table: str) -> sqlalchemy.Table:
-        return self._automap_base.classes[table]
+        pk = self.get_primary_key(table)
+        pk_empty = len(pk) == 0
+
+        # Note: SQLAlchemy's automap can be used here instead of creating a simple table model like below, but that is
+        # unnecessarily complicated for our purposes here - we do not need foreign keys mapped, and stuff.
+        # Also, automap doesn't support tables without primary keys, which is a dealbreaker.
+
+        columns = [
+            sqlalchemy.Column(col['name'], col['type'], primary_key=pk_empty or col['name'] in pk)
+            for col in self._inspect.get_columns(table)
+        ]
+
+        tbl = Table(table,
+                    sqlalchemy.MetaData(schema=self._inspect.default_schema_name),
+                    *columns
+                    )
+        return tbl
 
     def get_tables(self) -> Set[str]:
         out = set(self._inspect.get_table_names())
@@ -109,9 +142,9 @@ class EngineWrapper(EngineWrapperInterface):
             for fk in self._inspect.get_foreign_keys(table)}
 
 
-class CachedEngineWrapper(EngineWrapperInterface):
-    def __init__(self, delegate: EngineWrapperInterface):
-        if isinstance(delegate, CachedEngineWrapper):
+class CachedDBInspector(DBInspectorInterface):
+    def __init__(self, delegate: DBInspectorInterface):
+        if isinstance(delegate, CachedDBInspector):
             raise TypeError("DatabaseWrapper is already cached.")
 
         self._delegate = delegate
