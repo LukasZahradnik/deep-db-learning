@@ -350,11 +350,13 @@ if __name__ == "__main__":
     from db_transformer.helpers.objectpickle import serialize
     from sqlalchemy import create_engine
 
-    engine = create_engine("mysql+pymysql://guest:relational@relational.fit.cvut.cz:3306/mutagenesis")
+    dataset = "mutagenesis"
+
+    engine = create_engine(f"mysql+pymysql://guest:relational@relational.fit.cvut.cz:3306/{dataset}")
     with Session(engine) as session:
         schema = SchemaAnalyzer(engine, session, verbose=True).guess_schema()
 
     print(schema)
 
-    with open('dataset/mutagenesis.json', 'w') as fp:
+    with open(f'dataset/{dataset}.json', 'w') as fp:
         json.dump(serialize(schema), fp, indent=3)
