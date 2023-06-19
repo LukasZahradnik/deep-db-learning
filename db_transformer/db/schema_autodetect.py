@@ -44,7 +44,7 @@ class SchemaAnalyzer:
     """
 
     DETERMINED_TYPES: Dict[Type[ColumnDef], Tuple[Type[TypeEngine], ...]] = {
-        CategoricalColumnDef: (Boolean, String),
+        CategoricalColumnDef: (Boolean, ),
         NumericColumnDef: (Numeric, ),
         DateColumnDef: (Date, ),
         DateTimeColumnDef: (DateTime, ),
@@ -56,10 +56,10 @@ class SchemaAnalyzer:
     Per each ColumnDef, set of SQL types that are automatically matched to given ColumnDef.
     """
 
-    ID_NAME_REGEX = re.compile(r"_id$|^id_|_id_|Id$|Id[^a-z]|[Ii]dentifier|IDENTIFIER|ID[^a-zA-Z]|ID|[guGU]uid|[GU]UID$")
+    ID_NAME_REGEX = re.compile(r"_id$|^id_|_id_|Id$|Id[^a-z]|[Ii]dentifier|IDENTIFIER|ID[^a-zA-Z]|ID$|[guGU]uid[^a-z]|[guGU]uid$|[GU]UID[^a-zA-Z]|[GU]UID$")
 
     COMMON_NUMERIC_COLUMN_NAME_REGEX = re.compile(
-        r"balance|amount|size|duration|frequency|count|votes|score", re.IGNORECASE)  # TODO: add more?
+        r"balance|amount|size|duration|frequency|count|votes|score|number|age", re.IGNORECASE)  # TODO: add more?
 
     FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.95
     """
@@ -197,15 +197,12 @@ the :py:class:`OmitColumnDef` type
         for returning custom :py:class:`ColumnDef` subclasses.
         """
 
-        if column == "AccountId":
-            pass
-
         # check whether this column must be a specific column type
         for output_col_type, sql_col_types in self.DETERMINED_TYPES.items():
             if isinstance(col_type, sql_col_types):
                 return output_col_type
 
-        if isinstance(col_type, Integer):
+        if isinstance(col_type, (Integer, String)):
             cardinality = self.query_no_distinct(table, column)
 
             # first check if it is an ID-like column name
@@ -218,14 +215,19 @@ the :py:class:`OmitColumnDef` type
                         cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
                     return OmitColumnDef
 
-            # try matching based on common regex names
-            if self.COMMON_NUMERIC_COLUMN_NAME_REGEX.search(column):
+            if isinstance(col_type, Integer):
+                # try matching based on common regex names
+                if self.COMMON_NUMERIC_COLUMN_NAME_REGEX.search(column):
+                    return NumericColumnDef
+
+
+                if cardinality is not None and cardinality <= self.INTEGER_CARDINALITY_THRESHOLD:
+                    return CategoricalColumnDef
+
                 return NumericColumnDef
 
-            if cardinality is not None and cardinality <= self.INTEGER_CARDINALITY_THRESHOLD:
-                return CategoricalColumnDef
-
-            return NumericColumnDef
+        if isinstance(col_type, String):
+            return CategoricalColumnDef
 
         # no decision - omit
         return OmitColumnDef
