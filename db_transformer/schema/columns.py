@@ -16,6 +16,7 @@ __all__ = [
     'DateTimeColumnDef',
     'DurationColumnDef',
     'TimeColumnDef',
+    'TextColumnDef',
     'OmitColumnDef',
 ]
 
@@ -95,6 +96,12 @@ class DurationColumnDef(_AttrsColumnDef):
 @named_column_def('time')
 @define(kw_only=True)
 class TimeColumnDef(_AttrsColumnDef):
+    pass
+
+
+@named_column_def('text')
+@define(kw_only=True)
+class TextColumnDef(_AttrsColumnDef):
     pass
 
 

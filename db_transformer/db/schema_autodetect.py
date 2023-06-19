@@ -1,17 +1,33 @@
 from functools import lru_cache
 import re
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
+
 import inflect
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.sql.expression import null
-from sqlalchemy.sql.operators import is_, isnot
-from tqdm.std import tqdm
-from typing import Dict, Iterable, List, Optional, Pattern, Set, Tuple, Type, Union
 from sqlalchemy import select
+from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMTEXT
 from sqlalchemy.engine import Engine
-from sqlalchemy.sql import distinct, not_
-import sqlalchemy.sql.functions as fn
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from sqlalchemy.types import Integer, Boolean, Date, DateTime, LargeBinary, MatchType, PickleType, String, Numeric, Integer, Interval, Time, TypeEngine, Uuid
+from sqlalchemy.sql import distinct
+from sqlalchemy.sql.expression import null
+import sqlalchemy.sql.functions as fn
+from sqlalchemy.sql.operators import isnot
+from sqlalchemy.types import (
+    Boolean,
+    Date,
+    DateTime,
+    Integer,
+    Integer,
+    Interval,
+    Numeric,
+    String,
+    TEXT,
+    Text,
+    Time,
+    TypeEngine,
+    Unicode,
+)
+from tqdm.std import tqdm
 
 from db_transformer.db.db_inspector import (
     CachedDBInspector,
@@ -21,19 +37,26 @@ from db_transformer.db.db_inspector import (
 from db_transformer.helpers.collections.set_filter import SetFilter, SetFilterProtocol
 from db_transformer.schema import (
     CategoricalColumnDef,
+    ColumnDef,
+    ColumnDefs,
+    DateColumnDef,
+    DateTimeColumnDef,
+    DurationColumnDef,
     ForeignKeyColumnDef,
+    ForeignKeyDef,
+    KeyColumnDef,
     NumericColumnDef,
     OmitColumnDef,
     Schema,
-    ColumnDefs,
+    TableSchema,
+    TextColumnDef,
+    TimeColumnDef,
 )
-from db_transformer.schema import ColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, KeyColumnDef, TimeColumnDef, ForeignKeyDef, TableSchema
 
 
 __all__ = [
     "SchemaAnalyzer"
 ]
-
 
 class SchemaAnalyzer:
     """
@@ -45,27 +68,33 @@ class SchemaAnalyzer:
     """
 
     DETERMINED_TYPES: Dict[Type[ColumnDef], Tuple[Type[TypeEngine], ...]] = {
+        TextColumnDef: (Text, TEXT, LONGTEXT, MEDIUMTEXT, Unicode, ),
         CategoricalColumnDef: (Boolean, ),
         NumericColumnDef: (Numeric, ),
         DateColumnDef: (Date, ),
         DateTimeColumnDef: (DateTime, ),
         DurationColumnDef: (Interval, ),
         TimeColumnDef: (Time, ),
-        OmitColumnDef: (LargeBinary, MatchType, PickleType, Uuid),
     }
     """
     Per each ColumnDef, set of SQL types that are automatically matched to given ColumnDef.
     """
 
-    ID_NAME_REGEX = re.compile(r"_id$|^id_|_id_|Id$|Id[^a-z]|[Ii]dentifier|IDENTIFIER|ID[^a-zA-Z]|ID$|[guGU]uid[^a-z]|[guGU]uid$|[GU]UID[^a-zA-Z]|[GU]UID$")
+    ID_NAME_REGEX = re.compile(
+        r"_id$|^id_|_id_|Id$|Id[^a-z]|[Ii]dentifier|IDENTIFIER|ID[^a-zA-Z]|ID$|[guGU]uid[^a-z]|[guGU]uid$|[GU]UID[^a-zA-Z]|[GU]UID$")
 
     COMMON_NUMERIC_COLUMN_NAME_REGEX = re.compile(
         r"balance|amount|size|duration|frequency|count|votes|score|number|age", re.IGNORECASE)  # TODO: add more?
 
     FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.95
     """
-    When an integer-type database column matches `ID_NAME_REGEX`, checks the fraction of distinct values to total count of non-null values.
-    If the fraction exceeds this threshold, marks the column as `OmitColumnDef`.
+    The fraction of distinct values to total count of non-null values, which decides (in some situations) that type cannot be categorical.
+    If the fraction exceeds this threshold, marks the column as something other than categorical.
+    """
+
+    STRING_CARDINALITY_THRESHOLD = 800
+    """
+    Cardinality threshold below which string types are assumed categorical, and above which are assumed numeric.
     """
 
     INTEGER_CARDINALITY_THRESHOLD = 10000
@@ -199,7 +228,6 @@ the :py:class:`OmitColumnDef` type
         You may override this method in order to provide custom logic 
         for returning custom :py:class:`ColumnDef` subclasses.
         """
-
         # check whether this column must be a specific column type
         for output_col_type, sql_col_types in self.DETERMINED_TYPES.items():
             if isinstance(col_type, sql_col_types):
@@ -227,13 +255,20 @@ the :py:class:`OmitColumnDef` type
                 if self._inflect.singular_noun(column) is not False:
                     return NumericColumnDef
 
-                if cardinality is not None and cardinality <= self.INTEGER_CARDINALITY_THRESHOLD:
-                    return CategoricalColumnDef
+                if cardinality is None or cardinality > self.INTEGER_CARDINALITY_THRESHOLD:
+                    return NumericColumnDef
 
-                return NumericColumnDef
+                return CategoricalColumnDef
+            elif isinstance(col_type, String):
+                if cardinality is None or cardinality > self.STRING_CARDINALITY_THRESHOLD:
+                    return TextColumnDef
 
-        if isinstance(col_type, String):
-            return CategoricalColumnDef
+                n_nonnull = self.query_no_nonnull(table, column)
+                if (n_nonnull is not None and
+                        cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
+                    return TextColumnDef
+
+                return CategoricalColumnDef
 
         # no decision - omit
         return OmitColumnDef
@@ -249,7 +284,7 @@ the :py:class:`OmitColumnDef` type
             assert cardinality is not None, f"Column {table}.{column} was determined to be categorical but cardinality cannot be retrieved."
             return CategoricalColumnDef(key=in_primary_key, card=cardinality)
 
-        if cls in {KeyColumnDef, ForeignKeyColumnDef, NumericColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef, OmitColumnDef}:
+        if cls in {KeyColumnDef, ForeignKeyColumnDef, NumericColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef, OmitColumnDef, TextColumnDef}:
             return cls(key=in_primary_key)
 
         raise TypeError(f"No logic for instantiating {cls.__name__} has been provided to {SchemaAnalyzer.__name__}.")
@@ -315,9 +350,7 @@ if __name__ == "__main__":
     from db_transformer.helpers.objectpickle import serialize
     from sqlalchemy import create_engine
 
-    # engine = create_engine("mysql+pymysql://guest:relational@relational.fit.cvut.cz:3306/PTE")
     engine = create_engine("mysql+pymysql://guest:relational@relational.fit.cvut.cz:3306/mutagenesis")
-    # engine = create_engine("mysql+pymysql://guest:relational@relational.fit.cvut.cz:3306/stats")
     with Session(engine) as session:
         schema = SchemaAnalyzer(engine, session, verbose=True).guess_schema()
 
