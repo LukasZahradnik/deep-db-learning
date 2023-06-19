@@ -1,5 +1,6 @@
 from functools import lru_cache
 import re
+import inflect
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.expression import null
 from sqlalchemy.sql.operators import is_, isnot
@@ -118,6 +119,8 @@ the :py:class:`OmitColumnDef` type
 
         self._verbose = verbose
 
+        self._inflect = inflect.engine()
+
     @property
     def engine(self) -> Engine:
         """
@@ -220,6 +223,9 @@ the :py:class:`OmitColumnDef` type
                 if self.COMMON_NUMERIC_COLUMN_NAME_REGEX.search(column):
                     return NumericColumnDef
 
+                # check if the column name is plural - then it is probably a count
+                if self._inflect.singular_noun(column) is not False:
+                    return NumericColumnDef
 
                 if cardinality is not None and cardinality <= self.INTEGER_CARDINALITY_THRESHOLD:
                     return CategoricalColumnDef
@@ -240,8 +246,8 @@ the :py:class:`OmitColumnDef` type
         """
         if cls == CategoricalColumnDef:
             cardinality = self.query_no_distinct(table, column)
-            if cardinality is not None:
-                return CategoricalColumnDef(key=in_primary_key, card=cardinality)
+            assert cardinality is not None, f"Column {table}.{column} was determined to be categorical but cardinality cannot be retrieved."
+            return CategoricalColumnDef(key=in_primary_key, card=cardinality)
 
         if cls in {KeyColumnDef, ForeignKeyColumnDef, NumericColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef, OmitColumnDef}:
             return cls(key=in_primary_key)
