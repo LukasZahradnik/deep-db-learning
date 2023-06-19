@@ -17,6 +17,14 @@ from typing import (
 
 import attrs
 
+__all__ = [
+    'SimpleSerializer',
+    'TypedSerializer',
+    'TypedDeserializer',
+    'serialize',
+    'deserialize',
+]
+
 
 class Serializer(Protocol):
     def __call__(self, obj) -> Any:

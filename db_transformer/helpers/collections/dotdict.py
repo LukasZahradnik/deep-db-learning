@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from collections.abc import Mapping
 from typing import Dict, Generic, Optional, TypeVar, Union
 
@@ -5,7 +6,8 @@ from typing import Dict, Generic, Optional, TypeVar, Union
 _Value = TypeVar('_Value')
 
 __all__ = [
-    'DotDict'
+    'DotDict',
+    'OrderedDotDict',
 ]
 
 class DotDict(Generic[_Value], Mapping[str, _Value]):
@@ -18,7 +20,7 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
     """
 
     def __new__(cls, *kargs, **kwargs) -> 'DotDict[_Value]':
-        out = super().__new__(cls)
+        out = object.__new__(cls)
         object.__setattr__(out, '_DotDict__data', {})
         return out
 
@@ -88,3 +90,18 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
 
     def __str__(self) -> str:
         return self.__repr__()
+
+
+class OrderedDotDict(Generic[_Value], DotDict[_Value]):
+    """
+    A dict-like class that allows dot-notation access to individual elements. Ordered.
+
+    In addition, all methods that set values (such as `update()`) are routed through `__setitem__`.
+    Thus, when re-defining `__setitem__`, you are guaranteed to intercept any value being set.
+    This is not the case for traditional python `dict`.
+    """
+
+    def __new__(cls, *kargs, **kwargs) -> 'OrderedDotDict[_Value]':
+        out = object.__new__(cls)
+        object.__setattr__(out, '_DotDict__data', OrderedDict())
+        return out

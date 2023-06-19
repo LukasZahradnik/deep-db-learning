@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Dict, List, Type, TypeVar, Union
 from attrs import define, field
 import warnings
 
@@ -8,7 +8,7 @@ from db_transformer.helpers.objectpickle import (
     TypedSerializer,
     deserialize,
 )
-from db_transformer.helpers.collections import DotDict
+from db_transformer.helpers.collections import OrderedDotDict
 
 
 __all__ = [
@@ -93,7 +93,7 @@ class ColumnDefDeserializer(TypedDeserializer):
         return super()._get_class(type)
 
 
-class ColumnDefs(DotDict[Any]):
+class ColumnDefs(OrderedDotDict[Any]):
     """
     Represents the column definitions of one table.
     It is basically a dictionary of column_name -> `ColumnDef`.
@@ -102,6 +102,7 @@ class ColumnDefs(DotDict[Any]):
     DESERIALIZER = ColumnDefDeserializer()
 
     def __setitem__(self, key: str, value: Any):
+        # automatically cast the value to 
         return super().__setitem__(key, self.DESERIALIZER(value) if isinstance(value, dict) else value)
 
     def __getstate__(self) -> object:
@@ -148,9 +149,10 @@ class TableSchema:
     columns: ColumnDefs = field(converter=ColumnDefs)
     foreign_keys: List[ForeignKeyDef] = field(
         converter=lambda vs: [deserialize(v, ForeignKeyDef) if isinstance(v, dict) else v for v in vs],
-        repr=lambda fks: '[\n' + '\n'.join(['    ' + str(fk) for fk in fks]) + '\n]' if fks else '[]')
+        repr=lambda fks: '[\n' + ',\n'.join(['    ' + str(fk) for fk in fks]) + '\n]' if fks else '[]')
 
-class Schema(DotDict[TableSchema]):
+
+class Schema(OrderedDotDict[TableSchema]):
     """
     Represents the schema of the whole database.
     It is basically a dictionary of table_name -> `TableSchema`.
