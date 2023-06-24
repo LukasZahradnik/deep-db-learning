@@ -1,0 +1,7 @@
+[project]
+dependencies = [
+    "attrs >= 23.1.0",
+    "sqlalchemy >= 2.0.0",
+    "tqdm >= 4.65.0",
+    "inflect >= 6.0.0",
+]
