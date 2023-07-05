@@ -37,8 +37,8 @@ class BaseDBDataset(Dataset):
 
         # TODO: Temporary
         self.convertors = {
-            NumericColumnDef: NumConvertor(3),
-            CategoricalColumnDef: CatConvertor(3),
+            NumericColumnDef: NumConvertor(32),
+            CategoricalColumnDef: CatConvertor(32),
         }
 
         # TODO: Save the schema in the processed_file_names (offline support)
