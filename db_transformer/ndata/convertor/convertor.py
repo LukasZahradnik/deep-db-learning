@@ -9,7 +9,7 @@ class BaseConvertor(torch.nn.Module):
         self.dim = dim
 
     def create(self, table_name: str, column_name: str, column: _AttrsColumnDef):
-        pass
+        raise NotImplemented
 
     def forward(self, value, table_name: str, column_name: str, column: _AttrsColumnDef) -> torch.Tensor:
-        pass
+        raise NotImplemented

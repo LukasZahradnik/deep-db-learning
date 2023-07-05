@@ -2,7 +2,7 @@ import torch
 import torch_geometric.transforms as T
 
 from db_transformer import DBTransformer, MyMLP, SimpleTableTransformer
-from db_transformer.data import DataLoader
+from db_transformer.ndata import DataLoader
 from db_transformer.gnn import MyHeteroGNN
 
 from torchmetrics.classification import MulticlassAccuracy

@@ -16,7 +16,7 @@ class CatConvertor(BaseConvertor):
     def create(self, table_name: str, column_name: str, column: CategoricalColumnDef):
         name = f"{table_name}/{column_name}"
         if name not in self.cat_modules:
-            self.cat_modules.add_module(name, torch.nn.Embedding(column.card, self.dim))
+            self.cat_modules[name] = torch.nn.Embedding(column.card, self.dim)
 
     def forward(self, value, table_name: str, column_name: str, column: CategoricalColumnDef) -> torch.Tensor:
         name = f"{table_name}/{column_name}"
@@ -25,4 +25,4 @@ class CatConvertor(BaseConvertor):
             self.cat_to_int[name][value] = len(self.cat_to_int[name])
         index = self.cat_to_int[name][value]
 
-        return self.cat_modules[name](torch.tensor(index))
+        return self.cat_modules[name](torch.tensor(index)).unsqueeze(dim=0)
