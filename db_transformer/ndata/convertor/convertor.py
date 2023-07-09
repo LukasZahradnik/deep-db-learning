@@ -1,6 +1,6 @@
 import torch
 
-from db_transformer.schema.columns import _AttrsColumnDef
+from db_transformer.schema.columns import ColumnDef
 
 
 class BaseConvertor(torch.nn.Module):
@@ -8,8 +8,8 @@ class BaseConvertor(torch.nn.Module):
         super().__init__()
         self.dim = dim
 
-    def create(self, table_name: str, column_name: str, column: _AttrsColumnDef):
+    def create(self, table_name: str, column_name: str, column: ColumnDef):
         raise NotImplemented
 
-    def forward(self, value, table_name: str, column_name: str, column: _AttrsColumnDef) -> torch.Tensor:
+    def forward(self, value, table_name: str, column_name: str, column: ColumnDef) -> torch.Tensor:
         raise NotImplemented
