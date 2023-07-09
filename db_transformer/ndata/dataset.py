@@ -12,7 +12,6 @@ from db_transformer.ndata.convertor.num_convertor import NumConvertor
 from db_transformer.ndata.strategy.strategy import BaseStrategy
 from db_transformer.schema import Schema, NumericColumnDef, CategoricalColumnDef, KeyColumnDef, ForeignKeyColumnDef
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 from db_transformer.db import SchemaAnalyzer
 
 
@@ -46,8 +45,8 @@ class BaseDBDataset(Dataset):
         if self.schema is None:
             engine = create_engine(self.sql_connection_string)
 
-            with Session(engine) as session:
-                self.schema = SchemaAnalyzer(engine, session).guess_schema()
+            with engine.connect() as connection:
+                self.schema = SchemaAnalyzer(connection).guess_schema()
         super().__init__(root)
 
     def len(self) -> int:
@@ -59,8 +58,8 @@ class BaseDBDataset(Dataset):
     def process(self):
         engine = create_engine(self.sql_connection_string)
 
-        with Session(engine) as session:
-            self.length = get_table_len(self.target_table, session)
+        with engine.connect() as connection:
+            self.length = get_table_len(self.target_table, connection)
 
     @property
     def db_connection_string(self) -> str:
