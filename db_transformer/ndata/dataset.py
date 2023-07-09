@@ -94,7 +94,7 @@ class BaseDBDataset(Dataset):
                     self.convertors[type(col)].create(table_name, col_name, col)
 
             primary_col = [
-                i for i, col in enumerate(self.schema[table_name].columns.values()) if isinstance(col, KeyColumnDef)
+                i for i, col in enumerate(self.schema[table_name].columns.values()) if self.schema[table_name].columns.is_in_primary_key(col)
             ]
             table_primary_keys = {}
 
