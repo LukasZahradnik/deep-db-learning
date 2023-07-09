@@ -1,6 +1,6 @@
 from typing import List
 
-from sqlalchemy import Connection, Table, MetaData, Column, select, func, table
+from sqlalchemy import Connection, ForeignKeyConstraint, Table, MetaData, Column, select, func, table
 
 from db_transformer.db.db_inspector import DBInspector
 
@@ -17,11 +17,18 @@ def copy_database(src_inspector: DBInspector, dst: Connection):
 
         create_tables: List[Table] = []
         for table_name in tables:
+            pk = src_inspector.get_primary_key(table_name)
             src_table = Table(table_name, src_metadata)
 
             columns = [
-                Column(column.name, column.type)
+                Column(column.name, column.type, primary_key=column.name in pk)
                 for column in src_table.columns
+            ]
+
+            columns += [
+                ForeignKeyConstraint(
+                    columns=fk_def.columns, refcolumns=[fk_def.ref_table + '.' + c for c in fk_def.ref_columns], use_alter=True)
+                for fk_def in src_inspector.get_foreign_keys(table_name).values()
             ]
 
             create_tables.append(Table(table_name, dst_metadata, *columns))
