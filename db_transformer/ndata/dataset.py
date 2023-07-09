@@ -5,33 +5,45 @@ from typing import Union, List, Tuple, Optional
 import torch
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.data.data import BaseData
+from db_transformer.db.db_inspector import DBInspector
 
 from db_transformer.helpers.database import copy_database, get_table_len
 from db_transformer.ndata.convertor.cat_convertor import CatConvertor
 from db_transformer.ndata.convertor.num_convertor import NumConvertor
 from db_transformer.ndata.strategy.strategy import BaseStrategy
-from db_transformer.schema import Schema, NumericColumnDef, CategoricalColumnDef, KeyColumnDef, ForeignKeyColumnDef
-from sqlalchemy import create_engine
+from db_transformer.schema import Schema, NumericColumnDef, CategoricalColumnDef, ForeignKeyColumnDef
+from sqlalchemy import URL, Connection, create_engine
 from db_transformer.db import SchemaAnalyzer
 
 
-class BaseDBDataset(Dataset):
+class DBDataset(Dataset):
     def __init__(
         self,
         database: str,
         target_table: str,
-        sql_connection_string: str,
+        connection_url: Union[str, URL],
         root: str,
         strategy: BaseStrategy,
+        download: bool,
         schema: Optional[Schema] = None,
     ):
+        # if the schema is None, it will be processed in the `process` method.
         self.schema = schema
         self.database = database
         self.target_table = target_table
-        self.sql_connection_string = sql_connection_string
+
+        self.upstream_connection_url = connection_url
+        self.connection: Optional[Connection] = None
+        """
+        The sqlalchemy `Connection` instance.
+        If download=True, then it is the connection to the local database.
+        If download=False, then it is the connection to the upstream database.
+        """
+
+        self._do_download = download
 
         self.processed_data = []
-        self.length = 0
+        self._length = 0
         self.strategy = strategy
 
         # TODO: Temporary
@@ -40,31 +52,67 @@ class BaseDBDataset(Dataset):
             CategoricalColumnDef: CatConvertor(32),
         }
 
-        # TODO: Save the schema in the processed_file_names (offline support)
-        # TODO: Reconsider guessing the schema here - we have to share it somehow with the model itself
-        if self.schema is None:
-            engine = create_engine(self.sql_connection_string)
-
-            with engine.connect() as connection:
-                self.schema = SchemaAnalyzer(connection).guess_schema()
-        super().__init__(root)
-
-    def len(self) -> int:
-        return self.length
-
-    def download(self):
-        copy_database(self.sql_connection_string, self.db_connection_string, self.schema.keys())
-
-    def process(self):
-        engine = create_engine(self.sql_connection_string)
-
-        with engine.connect() as connection:
-            self.length = get_table_len(self.target_table, connection)
+        super().__init__(root)  # initialize NOW before we guess the schema !
 
     @property
-    def db_connection_string(self) -> str:
+    def local_connection_url(self) -> Union[str, URL]:
         db_file = f"{self.database}.db"
         return f"sqlite:///{os.path.join(self.raw_dir, db_file)}"
+
+    @property
+    def connection_url(self) -> Union[str, URL]:
+        if self.has_download:
+            return self.local_connection_url
+        else:
+            return self.upstream_connection_url
+
+    def __enter__(self):
+        return self
+
+    def close(self):
+        if self.connection is not None:
+            self.connection.close()
+
+    def __exit__(self, type, value, tb):
+        self.close()
+
+    def len(self) -> int:
+        return self._length
+
+    @property
+    def has_download(self):
+        # this override is needed because then Dataset skips calling the `download` method
+        # if this returns false
+        return self._do_download
+
+    def _create_inspector(self, connection: Connection) -> DBInspector:
+        return DBInspector(connection)
+
+    def download(self):
+        if not self.has_download:
+            raise RuntimeError(f"This {self.__class__.__name__} was initialized with download=False, so "
+                               "the upstream database is accessed directly instead of downloading. "
+                               "download() thus shouldn't be executed.")
+
+        if self.connection is None:
+            self.connection = Connection(create_engine(self.local_connection_url))
+
+        with Connection(create_engine(self.upstream_connection_url)) as upstream_connection:
+            copy_database(src_inspector=self._create_inspector(upstream_connection), dst=self.connection)
+
+    def _create_schema_analyzer(self, connection: Connection) -> SchemaAnalyzer:
+        return SchemaAnalyzer(self._create_inspector(connection))
+
+    def process(self):
+        if self.connection is None:
+            self.connection = Connection(create_engine(self.connection_url))
+
+        # TODO: Save the schema in the processed_file_names (instead of always re-running the analysis)
+        # TODO: Reconsider guessing the schema here - we have to share it somehow with the model itself
+        if self.schema is None:
+            self.schema = self._create_schema_analyzer(self.connection).guess_schema()
+
+        self._length = get_table_len(self.target_table, self.connection)
 
     @property
     def raw_file_names(self) -> Union[str, List[str], Tuple]:
@@ -75,12 +123,16 @@ class BaseDBDataset(Dataset):
         return [f"{self.database}.{self.target_table}.meta"]
 
     def get(self, idx: int) -> BaseData:
-        engine = create_engine(self.sql_connection_string)
-        with engine.connect() as connection:
-            data = self.strategy.get_db_data(idx, connection, self.target_table, self.schema)
+        if self.connection is None:
+            self.connection = Connection(create_engine(self.connection_url))
+
+        assert self.schema is not None
+        data = self.strategy.get_db_data(
+            idx, self.connection, self.target_table, self.schema)
         return self._to_hetero_data(data)
 
     def _to_hetero_data(self, data) -> HeteroData:
+        assert self.schema is not None
         hetero_data = HeteroData()
         primary_keys = defaultdict(dict)
 
@@ -94,7 +146,7 @@ class BaseDBDataset(Dataset):
                     self.convertors[type(col)].create(table_name, col_name, col)
 
             primary_col = [
-                i for i, col in enumerate(self.schema[table_name].columns.values()) if self.schema[table_name].columns.is_in_primary_key(col)
+                i for i, col_name in enumerate(self.schema[table_name].columns.keys()) if self.schema[table_name].columns.is_in_primary_key(col_name)
             ]
             table_primary_keys = {}
 
