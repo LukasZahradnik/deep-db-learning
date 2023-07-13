@@ -3,6 +3,7 @@ from functools import lru_cache
 from typing import Dict, FrozenSet, Optional, Set, Tuple
 
 import sqlalchemy
+from sqlalchemy import Connection
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import Table
 from sqlalchemy.types import TypeEngine
@@ -18,9 +19,17 @@ class DBInspectorInterface(ABC):
 
     @property
     @abstractmethod
+    def connection(self) -> Connection:
+        """
+        The underlying SQLAlchemy `Connection`.
+        """
+        ...
+
+    @property
+    @abstractmethod
     def engine(self) -> Engine:
         """
-        The underlying SQLAlchemy 'Engine'.
+        The underlying SQLAlchemy `Engine`.
         """
         ...
 
@@ -75,17 +84,18 @@ class DBInspector(DBInspectorInterface):
     """
 
     def __init__(self,
-                 engine: Engine,
+                 connection: Connection,
                  table_filter: Optional[SetFilterProtocol[str]] = None,
                  column_filters: Optional[Dict[str, SetFilterProtocol[str]]] = None,
                  ):
         """
-        :field engine: The database connection - instance of SQLAlchemy's `Engine` class.
+        :field connection: The database connection - instance of SQLAlchemy's `Connection` class.
         :field table_filter: A :py:class:`db_transformer.helpers.collections.set_filter.SetFilter` instance or a callable that filters a set of values. \
 All values that remain are the tables that the inspector will be aware of; excluded ones will be ignored.
         """
-        self._engine = engine
-        self._inspect = sqlalchemy.inspect(engine)
+
+        self._connection = connection
+        self._inspect = sqlalchemy.inspect(self._connection.engine)
         self._table_filter = table_filter
         self._column_filters = column_filters if column_filters is not None else {}
 
@@ -106,8 +116,12 @@ All values that remain are the tables that the inspector will be aware of; exclu
         #                            name_for_collection_relationship=name_for_collection_relationship)
 
     @property
+    def connection(self) -> Connection:
+        return self._connection
+
+    @property
     def engine(self) -> Engine:
-        return self._engine
+        return self._connection.engine
 
     def get_orm_table(self, table: str) -> sqlalchemy.Table:
         pk = self.get_primary_key(table)
@@ -189,6 +203,10 @@ class CachedDBInspector(DBInspectorInterface):
             raise TypeError("DatabaseWrapper is already cached.")
 
         self._delegate = delegate
+
+    @property
+    def connection(self) -> Connection:
+        return self._delegate.connection
 
     @property
     def engine(self) -> Engine:

@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Type, TypeVar, Union
+from collections.abc import Mapping
+from typing import Any, Dict, List, Set, Type, TypeVar, Union
 from attrs import define, field
 import warnings
 
@@ -116,6 +117,19 @@ class ColumnDefs(OrderedDotDict[Any]):
         for k, v in state.items():
             self[k] = self.DESERIALIZER(v)
 
+    def is_in_primary_key(self, column_name: str) -> bool:
+        col = self[column_name]
+
+        if hasattr(col, 'key'):
+            return bool(col.key)
+        if isinstance(col, Mapping) and 'key' in col:
+            return bool(col['key'])
+
+        return False
+
+    def get_primary_key(self) -> Set[str]:
+        return set((col_name for col_name in self if self.is_in_primary_key(col_name)))
+
 
 @define()
 class ForeignKeyDef:
@@ -150,6 +164,12 @@ class TableSchema:
     foreign_keys: List[ForeignKeyDef] = field(
         converter=lambda vs: [deserialize(v, ForeignKeyDef) if isinstance(v, dict) else v for v in vs],
         repr=lambda fks: '[\n' + ',\n'.join(['    ' + str(fk) for fk in fks]) + '\n]' if fks else '[]')
+
+    def get_primary_key(self) -> Set[str]:
+        """
+        Retrieve the primary key
+        """
+        return self.columns.get_primary_key()
 
 
 class Schema(OrderedDotDict[TableSchema]):

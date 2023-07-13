@@ -2,12 +2,9 @@ from functools import lru_cache
 import re
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 
-import inflect
-from sqlalchemy import select
+from sqlalchemy import select, Connection
 from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMTEXT
-from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
 from sqlalchemy.sql import distinct
 from sqlalchemy.sql.expression import null
 import sqlalchemy.sql.functions as fn
@@ -16,7 +13,6 @@ from sqlalchemy.types import (
     Boolean,
     Date,
     DateTime,
-    Integer,
     Integer,
     Interval,
     Numeric,
@@ -52,6 +48,7 @@ from db_transformer.schema import (
     TextColumnDef,
     TimeColumnDef,
 )
+import inflect
 
 
 __all__ = [
@@ -103,17 +100,15 @@ class SchemaAnalyzer:
     """
 
     def __init__(self,
-                 engine: Union[Engine, DBInspector, DBInspectorInterface],
-                 session: Session,
+                 connection: Union[Connection, DBInspector, DBInspectorInterface],
                  omit_filters: Union[SetFilterProtocol[Tuple[str, str]],
                                      Iterable[Tuple[str, str]], Tuple[str, str], None] = None,
                  verbose=False,
                  ) -> None:
         """
-        :field engine: The database connection - instance of SQLAlchemny's `Engine` class, \
+        :field connection: The database connection - instance of SQLAlchemny's `Connection` class, \
 or a custom :py:class:`DBInspector` or :py:class:`DBInspectorInterface` instance, which allows to \
 e.g. specify database tables or table columns to be completely ignored.
-        :field session: Instance of SQLAlchemy's `Session` class - for running database queries.
         :field omit_filters: A filter for (table_name, column_name) tuples. Can be one of the following:
             a) a list of such tuples, in which case they will all receive the :py:class:`OmitColumnDef` type
             b) a :py:class:`db_transformer.helpers.collections.set_filter.SetFilter` instance, allowing to specify either a whitelist or a blacklist (or both), in which case \
@@ -123,19 +118,18 @@ the :py:class:`OmitColumnDef` type
         :field verbose: If true, will show executed `SELECT` statements, as well as a per-table progress bar.
         """
 
-        if isinstance(engine, CachedDBInspector):
-            inspector = engine
-        elif isinstance(engine, DBInspectorInterface):
+        if isinstance(connection, CachedDBInspector):
+            inspector = connection
+        elif isinstance(connection, DBInspectorInterface):
             # we want to cache it anyway for a single SchemaAnalyzer instance
-            inspector = CachedDBInspector(engine)
-        elif isinstance(engine, Engine):
-            inspector = CachedDBInspector(DBInspector(engine))
+            inspector = CachedDBInspector(connection)
+        elif isinstance(connection, Connection):
+            inspector = CachedDBInspector(DBInspector(connection))
         else:
             raise TypeError(
-                f"database is neither {Engine}, nor an implementation of {DBInspectorInterface}: {engine}")
+                f"database is neither {Connection.__name__}, nor an implementation of {DBInspectorInterface.__name__}: {connection}")
 
         self._inspector = inspector
-        self._session = session
 
         if isinstance(omit_filters, tuple):
             omit_filters = [omit_filters]
@@ -151,11 +145,11 @@ the :py:class:`OmitColumnDef` type
         self._inflect = inflect.engine()
 
     @property
-    def engine(self) -> Engine:
+    def connection(self) -> Connection:
         """
-        The underlying SQLAlchemy 'Engine'.
+        The underlying SQLAlchemy `Connection`.
         """
-        return self._inspector.engine
+        return self._inspector.connection
 
     @property
     def db_inspector(self) -> CachedDBInspector:
@@ -194,7 +188,7 @@ the :py:class:`OmitColumnDef` type
             query = select(fn.count(distinct(col))).select_from(tbl)
             if self._verbose:
                 print(query)
-            return self._session.scalar(query)
+            return self.connection.scalar(query)
         except OperationalError as e:
             return None
 
@@ -214,7 +208,7 @@ the :py:class:`OmitColumnDef` type
             query = select(fn.count(col)).select_from(tbl).where(isnot(col, null()))
             if self._verbose:
                 print(query)
-            return self._session.scalar(query)
+            return self.connection.scalar(query)
         except OperationalError:
             return None
 
@@ -352,9 +346,9 @@ if __name__ == "__main__":
 
     dataset = "mutagenesis"
 
-    engine = create_engine(f"mysql+pymysql://guest:relational@relational.fit.cvut.cz:3306/{dataset}")
-    with Session(engine) as session:
-        schema = SchemaAnalyzer(engine, session, verbose=True).guess_schema()
+    engine = create_engine(f"mariadb+mariadbconnector://guest:relational@relational.fit.cvut.cz:3306/{dataset}")
+    with engine.connect() as connection:
+        schema = SchemaAnalyzer(connection, verbose=True).guess_schema()
 
     print(schema)
 
