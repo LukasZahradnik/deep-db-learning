@@ -2,6 +2,9 @@ from collections.abc import Mapping
 from typing import Any, Dict, List, Set, Type, TypeVar, Union
 from attrs import define, field
 import warnings
+import inspect
+
+from torch_geometric.data.dataset import Tuple
 
 from db_transformer.helpers.objectpickle import (
     SimpleSerializer,
@@ -14,6 +17,7 @@ from db_transformer.helpers.collections import OrderedDotDict
 
 __all__ = [
     'named_column_def',
+    'column_def_to_name',
     'ColumnDefSerializer',
     'ColumnDefDeserializer',
     'ColumnDefs',
@@ -50,6 +54,18 @@ def named_column_def(name: str):
         return cls
 
     return class_wrapper
+
+
+def column_def_to_name(column_def: Union[object, Type[object]]) -> str:
+    if callable(getattr(column_def, 'get_column_type_name', None)):
+        return column_def.get_column_type_name()
+
+    if getattr(column_def, "__qualname__", None) is not None:
+        cls = column_def
+    else:
+        cls = column_def.__class__
+    return f"({cls.__module__}, {cls.__qualname__})"
+    
 
 
 class ColumnDefSerializer(TypedSerializer):
