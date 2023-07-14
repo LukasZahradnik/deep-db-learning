@@ -1,6 +1,7 @@
 from collections import defaultdict
 import os.path
-from typing import List, Optional, Tuple, Union
+import sys
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sqlalchemy.engine import Connection, create_engine
 from sqlalchemy.engine.url import URL
@@ -11,14 +12,28 @@ from torch_geometric.data.data import BaseData
 from db_transformer.db import SchemaAnalyzer
 from db_transformer.db.db_inspector import DBInspector
 from db_transformer.helpers.database import copy_database, get_table_len
-from db_transformer.ndata.convertor.cat_convertor import CatConvertor
-from db_transformer.ndata.convertor.num_convertor import NumConvertor
+from db_transformer.ndata.convertor import (
+    CatConvertor,
+    DateConvertor,
+    DateTimeConvertor,
+    DurationConvertor,
+    NumConvertor,
+    PerTypeConvertor,
+    TimeConvertor,
+)
+from db_transformer.ndata.convertor.schema_convertor import SchemaConvertor
 from db_transformer.ndata.strategy.strategy import BaseStrategy
 from db_transformer.schema import (
     CategoricalColumnDef,
+    DateColumnDef,
+    DateTimeColumnDef,
+    DurationColumnDef,
     ForeignKeyColumnDef,
+    KeyColumnDef,
     NumericColumnDef,
+    OmitColumnDef,
     Schema,
+    TimeColumnDef,
 )
 
 
@@ -32,6 +47,8 @@ class DBDataset(Dataset):
         strategy: BaseStrategy,
         download: bool,
         schema: Optional[Schema] = None,
+        convertor: Optional[SchemaConvertor] = None,
+        dim: Optional[int] = None,
         verbose=True,
     ):
         # if the schema is None, it will be processed in the `process` method.
@@ -54,18 +71,36 @@ class DBDataset(Dataset):
         self._length = 0
         self.strategy = strategy
 
-        # TODO: Temporary
-        self.convertors = {
-            NumericColumnDef: NumConvertor(32),
-            CategoricalColumnDef: CatConvertor(32),
-        }
+        if convertor is not None and dim is not None:
+            raise ValueError("If convertor is specified, then dim must not be specified.")
+        elif dim is not None:
+            # TODO: Temporary
+            self.convertor = PerTypeConvertor({
+                KeyColumnDef: lambda: None,  # skip warnings
+                ForeignKeyColumnDef: lambda: None,  # skip warnings
+                OmitColumnDef: lambda: None,  # skip warnings
+                NumericColumnDef: lambda: NumConvertor(dim),
+                CategoricalColumnDef: lambda: CatConvertor(dim),
+                DateColumnDef: lambda: DateConvertor(dim, segments=['year', 'month', 'day']),
+                # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
+                DateTimeColumnDef: lambda: DateTimeConvertor(dim, segments=['year', 'month', 'day', 'total_seconds']),
+                # DurationColumnDef: lambda: DurationConvertor(dim),
+            })
+        elif convertor is not None:
+            self.convertor = convertor
+        else:
+            raise ValueError("Either convertor or dim must be specified.")
 
         super().__init__(root)  # initialize NOW before we guess the schema !
 
     @property
-    def local_connection_url(self) -> Union[str, URL]:
+    def local_file(self) -> str:
         db_file = f"{self.database}.db"
-        return f"sqlite:///{os.path.join(self.raw_dir, db_file)}"
+        return os.path.join(self.raw_dir, db_file)
+
+    @property
+    def local_connection_url(self) -> Union[str, URL]:
+        return f"sqlite:///{self.local_file}"
 
     @property
     def connection_url(self) -> Union[str, URL]:
@@ -102,14 +137,25 @@ class DBDataset(Dataset):
                                "the upstream database is accessed directly instead of downloading. "
                                "download() thus shouldn't be executed.")
 
-        with Connection(create_engine(self.upstream_connection_url)) as upstream_connection:
-            if self.connection is None:
-                self.connection = Connection(create_engine(self.local_connection_url))
+        if self.connection is None:
+            self.connection = Connection(create_engine(self.local_connection_url))
 
-            copy_database(src_inspector=self._create_inspector(upstream_connection), dst=self.connection)
+        try:
+            with Connection(create_engine(self.upstream_connection_url)) as upstream_connection:
+                if self._verbose:
+                    print("Copying database...", file=sys.stderr)
+
+                copy_database(src_inspector=self._create_inspector(upstream_connection), dst=self.connection,
+                              verbose=self._verbose)
+        except Exception as e:
+            self.connection.close()
+
+            if os.path.exists(self.local_file):
+                os.remove(self.local_file)
+            raise e
 
     def _create_schema_analyzer(self, connection: Connection) -> SchemaAnalyzer:
-        return SchemaAnalyzer(self._create_inspector(connection))
+        return SchemaAnalyzer(self._create_inspector(connection), verbose=self._verbose)
 
     def process(self):
         if self.connection is None:
@@ -133,13 +179,15 @@ class DBDataset(Dataset):
     def processed_file_names(self) -> Union[str, List[str], Tuple]:
         return [f"{self.database}.{self.target_table}.meta"]
 
-    def get(self, idx: int) -> BaseData:
+    def get_as_dict(self, idx: int) -> Dict[str, Set[Tuple[Any, ...]]]:
         if self.connection is None:
             self.connection = Connection(create_engine(self.connection_url))
 
         assert self.schema is not None
-        data = self.strategy.get_db_data(
-            idx, self.connection, self.target_table, self.schema)
+        return self.strategy.get_db_data(idx, self.connection, self.target_table, self.schema)
+
+    def get(self, idx: int) -> BaseData:
+        data = self.get_as_dict(idx)
         return self._to_hetero_data(data)
 
     def _to_hetero_data(self, data) -> HeteroData:
@@ -147,14 +195,15 @@ class DBDataset(Dataset):
         hetero_data = HeteroData()
         primary_keys = defaultdict(dict)
 
+        self.convertor.create(self.schema)
+
         for table_name, table_data in data.items():
             table_tensor_data = []
             process_cols = []
 
             for i, (col_name, col) in enumerate(self.schema[table_name].columns.items()):
-                if type(col) in self.convertors:
-                    process_cols.append((i, col_name, col, self.convertors[type(col)]))
-                    self.convertors[type(col)].create(table_name, col_name, col)
+                if self.convertor.has(table_name, col_name, col):
+                    process_cols.append((i, col_name, col))
 
             primary_col = [
                 i for i, col_name in enumerate(self.schema[table_name].columns.keys()) if self.schema[table_name].columns.is_in_primary_key(col_name)
@@ -163,7 +212,7 @@ class DBDataset(Dataset):
 
             for index, row in enumerate(table_data):
                 row_tensor_data = [
-                    convertor(row[i], table_name, col_name, col) for i, col_name, col, convertor in process_cols
+                    self.convertor(row[i], table_name, col_name, col) for i, col_name, col in process_cols
                 ]
 
                 if not row_tensor_data:

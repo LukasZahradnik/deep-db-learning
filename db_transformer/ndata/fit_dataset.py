@@ -1,4 +1,8 @@
 from typing import Optional
+from sqlalchemy.engine.url import URL
+
+from torch_geometric.data.dataset import Union
+from db_transformer.ndata.convertor.schema_convertor import SchemaConvertor
 
 from db_transformer.ndata.dataset import DBDataset
 from db_transformer.ndata.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS
@@ -9,7 +13,15 @@ from db_transformer.schema import Schema
 
 class FITRelationalDataset(DBDataset):
     def __init__(
-        self, database: str, target_table: Optional[str], root: str, strategy: BaseStrategy, schema: Optional[Schema] = None,
+        self,
+        database: str,
+        root: str,
+        strategy: BaseStrategy,
+        target_table: Optional[str] = None,
+        schema: Optional[Schema] = None,
+        convertor: Optional[SchemaConvertor] = None,
+        dim: Optional[int] = None,
+        verbose=True,
         connector: str = "mariadb+mariadbconnector",
     ):
         connection_url = f"{connector}://guest:relational@relational.fit.cvut.cz:3306/{database}"
@@ -26,6 +38,9 @@ class FITRelationalDataset(DBDataset):
                          root=root,
                          strategy=strategy,
                          download=True,
+                         convertor=convertor,
+                         dim=dim,
+                         verbose=verbose,
                          schema=schema)
 
 

@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, Set
+from typing import Any, Dict, Set, Tuple
 
 from sqlalchemy.engine import Connection
 from sqlalchemy.sql import column, select, table
@@ -15,7 +15,7 @@ class BFSStrategy(BaseStrategy):
     def _get_keys(self, data, index: int):
         return [d[index] for d in data]
 
-    def get_db_data(self, idx: int, connection: Connection, target_table: str, schema: Schema) -> Dict[str, Set]:
+    def get_db_data(self, idx: int, connection: Connection, target_table: str, schema: Schema) -> Dict[str, Set[Tuple[Any, ...]]]:
         queue = [(target_table, 0, None, None, None)]
         table_data = defaultdict(lambda: set())
 
