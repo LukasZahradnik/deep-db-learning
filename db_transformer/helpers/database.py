@@ -1,13 +1,15 @@
-from typing import List
+from typing import Iterable, List, TypeVar
+import sqlalchemy
 
 from sqlalchemy.engine import Connection
 from sqlalchemy.schema import Column, ForeignKeyConstraint, MetaData, Table
 from sqlalchemy.sql import func, select, table
 
 from db_transformer.db.db_inspector import DBInspector
+from db_transformer.helpers.progress import wrap_progress
 
 
-def copy_database(src_inspector: DBInspector, dst: Connection):
+def copy_database(src_inspector: DBInspector, dst: Connection, verbose=False):
     with dst.begin():  # transaction ends at the end of the `with` block
         dst_metadata = MetaData()
         dst_metadata.reflect(bind=dst.engine)
@@ -37,9 +39,10 @@ def copy_database(src_inspector: DBInspector, dst: Connection):
 
         dst_metadata.create_all(dst.engine, tables=create_tables)
 
-        for table_name, dst_table in zip(tables, create_tables):
+        for table_name, dst_table in wrap_progress(zip(tables, create_tables), verbose=verbose, desc="Tables", total=len(tables)):
             # TODO: Insert/Select in batch
-            for res in src_inspector.connection.execute(select("*", table(table_name))).all():
+            select_query = select(dst_table.columns)
+            for res in wrap_progress(src_inspector.connection.execute(select_query).all(), verbose=verbose, desc="Rows"):
                 dst.execute(dst_table.insert().values(res))
 
 

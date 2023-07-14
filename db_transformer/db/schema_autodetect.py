@@ -1,5 +1,6 @@
 from functools import lru_cache
 import re
+import sys
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 
 import inflect
@@ -24,7 +25,6 @@ from sqlalchemy.types import (
     TypeEngine,
     Unicode,
 )
-from tqdm.std import tqdm
 
 from db_transformer.db.db_inspector import (
     CachedDBInspector,
@@ -32,6 +32,7 @@ from db_transformer.db.db_inspector import (
     DBInspectorInterface,
 )
 from db_transformer.helpers.collections.set_filter import SetFilter, SetFilterProtocol
+from db_transformer.helpers.progress import wrap_progress
 from db_transformer.schema import (
     CategoricalColumnDef,
     ColumnDef,
@@ -187,8 +188,6 @@ the :py:class:`OmitColumnDef` type
             tbl = self.db_inspector.get_orm_table(table)
             col = getattr(tbl.c, column)
             query = select(fn.count(distinct(col))).select_from(tbl)
-            if self._verbose:
-                print(query)
             return self.connection.scalar(query)
         except OperationalError as e:
             return None
@@ -207,8 +206,6 @@ the :py:class:`OmitColumnDef` type
             tbl = self.db_inspector.get_orm_table(table)
             col = getattr(tbl.c, column)
             query = select(fn.count(col)).select_from(tbl).where(isnot(col, null()))
-            if self._verbose:
-                print(query)
             return self.connection.scalar(query)
         except OperationalError:
             return None
@@ -325,11 +322,8 @@ the :py:class:`OmitColumnDef` type
         """
 
         schema = Schema()
-        progress = self.db_inspector.get_tables()
-        if self._verbose:
-            progress = tqdm(self.db_inspector.get_tables(), desc="Table")
 
-        for table in progress:
+        for table in wrap_progress(self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"):
             column_defs = ColumnDefs()
             fks: List[ForeignKeyDef] = list(self.db_inspector.get_foreign_keys(table).values())
             for column in self.db_inspector.get_columns(table):

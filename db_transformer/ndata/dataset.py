@@ -32,6 +32,7 @@ class DBDataset(Dataset):
         strategy: BaseStrategy,
         download: bool,
         schema: Optional[Schema] = None,
+        verbose=True,
     ):
         # if the schema is None, it will be processed in the `process` method.
         self.schema = schema
@@ -47,6 +48,7 @@ class DBDataset(Dataset):
         """
 
         self._do_download = download
+        self._verbose = verbose
 
         self.processed_data = []
         self._length = 0
@@ -116,6 +118,9 @@ class DBDataset(Dataset):
         # TODO: Save the schema in the processed_file_names (instead of always re-running the analysis)
         # TODO: Reconsider guessing the schema here - we have to share it somehow with the model itself
         if self.schema is None:
+            if self._verbose:
+                print("Guessing schema...", file=sys.stderr)
+
             self.schema = self._create_schema_analyzer(self.connection).guess_schema()
 
         self._length = get_table_len(self.target_table, self.connection)
