@@ -100,10 +100,10 @@ class DBDataset(Dataset):
                                "the upstream database is accessed directly instead of downloading. "
                                "download() thus shouldn't be executed.")
 
-        if self.connection is None:
-            self.connection = Connection(create_engine(self.local_connection_url))
-
         with Connection(create_engine(self.upstream_connection_url)) as upstream_connection:
+            if self.connection is None:
+                self.connection = Connection(create_engine(self.local_connection_url))
+
             copy_database(src_inspector=self._create_inspector(upstream_connection), dst=self.connection)
 
     def _create_schema_analyzer(self, connection: Connection) -> SchemaAnalyzer:
