@@ -25,7 +25,7 @@ def copy_database(src_inspector: DBInspector, dst: Connection, verbose=False):
             src_table = Table(table_name, src_metadata)
 
             columns = [
-                Column(column.name, column.type, primary_key=column.name in pk)
+                Column(column.name, column.type.as_generic(), primary_key=column.name in pk)
                 for column in src_table.columns
             ]
 
