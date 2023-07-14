@@ -2,10 +2,11 @@ from functools import lru_cache
 import re
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 
-from sqlalchemy import select, Connection
+import inflect
 from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMTEXT
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.sql import distinct
+from sqlalchemy.sql import distinct, select
 from sqlalchemy.sql.expression import null
 import sqlalchemy.sql.functions as fn
 from sqlalchemy.sql.operators import isnot
@@ -48,12 +49,12 @@ from db_transformer.schema import (
     TextColumnDef,
     TimeColumnDef,
 )
-import inflect
 
 
 __all__ = [
     "SchemaAnalyzer"
 ]
+
 
 class SchemaAnalyzer:
     """

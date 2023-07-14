@@ -1,6 +1,6 @@
 from typing import Dict, Set
 
-from sqlalchemy import Connection
+from sqlalchemy.engine import Connection
 
 from db_transformer.schema import Schema
 

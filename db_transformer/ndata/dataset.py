@@ -1,19 +1,25 @@
-import os.path
 from collections import defaultdict
-from typing import Union, List, Tuple, Optional
+import os.path
+from typing import List, Optional, Tuple, Union
 
+from sqlalchemy.engine import Connection, create_engine
+from sqlalchemy.engine.url import URL
 import torch
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.data.data import BaseData
-from db_transformer.db.db_inspector import DBInspector
 
+from db_transformer.db import SchemaAnalyzer
+from db_transformer.db.db_inspector import DBInspector
 from db_transformer.helpers.database import copy_database, get_table_len
 from db_transformer.ndata.convertor.cat_convertor import CatConvertor
 from db_transformer.ndata.convertor.num_convertor import NumConvertor
 from db_transformer.ndata.strategy.strategy import BaseStrategy
-from db_transformer.schema import Schema, NumericColumnDef, CategoricalColumnDef, ForeignKeyColumnDef
-from sqlalchemy import URL, Connection, create_engine
-from db_transformer.db import SchemaAnalyzer
+from db_transformer.schema import (
+    CategoricalColumnDef,
+    ForeignKeyColumnDef,
+    NumericColumnDef,
+    Schema,
+)
 
 
 class DBDataset(Dataset):

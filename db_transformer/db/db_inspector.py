@@ -3,8 +3,7 @@ from functools import lru_cache
 from typing import Dict, FrozenSet, Optional, Set, Tuple
 
 import sqlalchemy
-from sqlalchemy import Connection
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.schema import Table
 from sqlalchemy.types import TypeEngine
 

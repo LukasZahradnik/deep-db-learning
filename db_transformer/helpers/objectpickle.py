@@ -4,16 +4,7 @@ Doesn't support recursive references."""
 import dataclasses
 import inspect
 import sys
-from typing import (
-    Any,
-    Iterable,
-    Mapping,
-    Optional,
-    Protocol,
-    Type,
-    TypeVar,
-    overload,
-)
+from typing import Any, Iterable, Mapping, Optional, Protocol, Type, TypeVar, overload
 
 import attrs
 

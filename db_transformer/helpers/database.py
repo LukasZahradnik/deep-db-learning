@@ -1,6 +1,8 @@
 from typing import List
 
-from sqlalchemy import Connection, ForeignKeyConstraint, Table, MetaData, Column, select, func, table
+from sqlalchemy.engine import Connection
+from sqlalchemy.schema import Column, ForeignKeyConstraint, MetaData, Table
+from sqlalchemy.sql import func, select, table
 
 from db_transformer.db.db_inspector import DBInspector
 

@@ -1,7 +1,8 @@
 from collections import defaultdict
 from typing import Dict, Set
 
-from sqlalchemy import Connection, table, select, column
+from sqlalchemy.engine import Connection
+from sqlalchemy.sql import column, select, table
 
 from db_transformer.ndata.strategy.strategy import BaseStrategy
 from db_transformer.schema import Schema
