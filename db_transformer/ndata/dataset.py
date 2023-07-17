@@ -245,7 +245,7 @@ class DBDataset(Dataset):
                 table_primary_keys = primary_keys[col.ref_table]
 
                 for i_index, row in enumerate(table_data):
-                    if row[index] is None:
+                    if row[index] is None or row[index] not in table_primary_keys:
                         continue
 
                     edge_index.append([i_index, table_primary_keys[row[index]]])
