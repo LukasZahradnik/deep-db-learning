@@ -34,16 +34,7 @@ class BFSStrategy(BaseStrategy):
                 query = select("*", table_obj).where(column(key).in_(set(keys)))
 
             for res in connection.execute(query).all():
-                res_tuple = res.tuple()
-
-                if depth + 1 == self.max_depth and len(schema[table_name].foreign_keys) != 0:
-                    res_tuple = [*res_tuple]
-
-                    # TODO: This supports only one col per key
-                    for col in schema[table_name].foreign_keys:
-                        res_tuple[col_to_index[col.columns[0]]] = None
-                    res_tuple = tuple(res_tuple)
-                table_data[table_name].add(res_tuple)
+                table_data[table_name].add(res.tuple())
 
             if depth + 1 == self.max_depth:
                 continue
