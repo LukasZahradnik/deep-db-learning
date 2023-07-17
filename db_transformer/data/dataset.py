@@ -12,7 +12,7 @@ from torch_geometric.data.data import BaseData
 from db_transformer.db import SchemaAnalyzer
 from db_transformer.db.db_inspector import DBInspector
 from db_transformer.helpers.database import copy_database, get_table_len
-from db_transformer.ndata.convertor import (
+from db_transformer.data.convertor import (
     CatConvertor,
     DateConvertor,
     DateTimeConvertor,
@@ -21,8 +21,8 @@ from db_transformer.ndata.convertor import (
     PerTypeConvertor,
     TimeConvertor,
 )
-from db_transformer.ndata.convertor.schema_convertor import SchemaConvertor
-from db_transformer.ndata.strategy.strategy import BaseStrategy
+from db_transformer.data.convertor.schema_convertor import SchemaConvertor
+from db_transformer.data.strategy.strategy import BaseStrategy
 from db_transformer.schema import (
     CategoricalColumnDef,
     DateColumnDef,
@@ -224,6 +224,7 @@ class DBDataset(Dataset):
             else:
                 if table_primary_keys:
                     primary_keys[table_name] = table_primary_keys
+                print(table_tensor_data, table_data, table_name)
                 hetero_data[table_name].x = torch.stack(table_tensor_data)
 
         for table_name, table_data in data.items():

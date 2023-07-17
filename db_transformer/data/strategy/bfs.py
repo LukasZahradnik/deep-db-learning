@@ -4,7 +4,7 @@ from typing import Any, Dict, Set, Tuple
 from sqlalchemy.engine import Connection
 from sqlalchemy.sql import column, select, table
 
-from db_transformer.ndata.strategy.strategy import BaseStrategy
+from db_transformer.data.strategy.strategy import BaseStrategy
 from db_transformer.schema import Schema
 
 

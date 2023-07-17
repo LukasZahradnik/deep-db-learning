@@ -4,8 +4,8 @@ from typing import get_args as t_get_args
 
 from torch_geometric.data.dataset import sys
 
-from db_transformer.ndata.fit_dataset import FITRelationalDataset
-from db_transformer.ndata.strategy.bfs import BFSStrategy
+from db_transformer.data.fit_dataset import FITRelationalDataset
+from db_transformer.data.strategy.bfs import BFSStrategy
 
 DatasetName = Literal["mutagenesis", "financial", "stats", "imdb_ijs", "CORA",
                       "trains", "Hepatitis_std", "genes", "UW_std", "PTE", "Toxicology", "Carcinogenesis"]

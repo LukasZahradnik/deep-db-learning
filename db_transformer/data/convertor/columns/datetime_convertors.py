@@ -5,8 +5,8 @@ from datetime import datetime, time
 import torch
 from torch_geometric.data.dataset import Union
 
-from db_transformer.ndata.convertor.columns.column_convertor import ColumnConvertor
-from db_transformer.ndata.convertor.columns.num_convertor import NumConvertor
+from db_transformer.data.convertor.columns.column_convertor import ColumnConvertor
+from db_transformer.data.convertor.columns.num_convertor import NumConvertor
 from db_transformer.schema.columns import ColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef
 
 
