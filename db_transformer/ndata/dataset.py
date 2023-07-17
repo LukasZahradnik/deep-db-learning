@@ -227,14 +227,10 @@ class DBDataset(Dataset):
                 hetero_data[table_name].x = torch.stack(table_tensor_data)
 
         for table_name, table_data in data.items():
-            foreign_cols = {
-                col_name: i
-                for i, (col_name, col) in enumerate(self.schema[table_name].columns.items())
-                if isinstance(col, ForeignKeyColumnDef)
-            }
+            col_to_index = {col_name: i for i, col_name in enumerate(self.schema[table_name].columns.keys())}
 
             foreign_cols = [
-                (foreign_cols[foreigns.columns[0]], foreigns) for foreigns in self.schema[table_name].foreign_keys
+                (col_to_index[foreigns.columns[0]], foreigns) for foreigns in self.schema[table_name].foreign_keys
             ]
 
             if not foreign_cols:
