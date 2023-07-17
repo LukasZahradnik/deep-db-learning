@@ -109,16 +109,15 @@ class TimeConvertor(_SegmentedConvertor[TimeColumnDef, TimeSegment]):
 DateTimeSegment = Union[TimeSegment, DateSegment]
 
 
-class DateTimeConvertor(_SegmentedConvertor[DateTimeColumnDef, DateTimeSegment]):
-    @staticmethod
-    def _merge_segments() -> Dict[DateTimeSegment, Callable[[datetime], float]]:
-        out: Dict[DateTimeSegment, Callable[[datetime], float]] = {}
-        for segment, c_datetime in DateConvertor._DATE_SEGMENT_TO_NUMERIC.items():
-            out[segment] = c_datetime
-        for segment, c_time in TimeConvertor._TIME_SEGMENT_TO_NUMERIC.items():
-            out[segment] = lambda datetime: c_time(datetime.time())
-        return out
+def _merge_segments() -> Dict[DateTimeSegment, Callable[[datetime], float]]:
+    out: Dict[DateTimeSegment, Callable[[datetime], float]] = {}
+    for segment, c_datetime in DateConvertor._DATE_SEGMENT_TO_NUMERIC.items():
+        out[segment] = c_datetime
+    for segment, c_time in TimeConvertor._TIME_SEGMENT_TO_NUMERIC.items():
+        out[segment] = lambda datetime: c_time(datetime.time())
+    return out
 
+class DateTimeConvertor(_SegmentedConvertor[DateTimeColumnDef, DateTimeSegment]):
     _DATETIME_SEGMENT_TO_NUMERIC = _merge_segments()
 
     @classmethod
