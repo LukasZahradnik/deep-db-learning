@@ -17,6 +17,7 @@ class BFSStrategy(BaseStrategy):
 
     def get_db_data(self, idx: int, connection: Connection, target_table: str, schema: Schema) -> Dict[str, Set[Tuple[Any, ...]]]:
         queue = [(target_table, 0, None, None, None)]
+        empty_set = set()
         table_data = defaultdict(lambda: set())
 
         while len(queue) != 0:
@@ -42,12 +43,12 @@ class BFSStrategy(BaseStrategy):
             processed_foreigns = set()
             for col in schema[table_name].foreign_keys:
                 # TODO: This supports only one col per key
-                fkeys = self._get_keys(table_data[table_name], col_to_index[col.columns[0]])
+                fkeys = self._get_keys(table_data.get(table_name, empty_set), col_to_index[col.columns[0]])
                 queue.append((col.ref_table, depth + 1, table_name, col.ref_columns[0], fkeys))
                 processed_foreigns.add(col.ref_table)
 
             # TODO: This assumes that other tables are referencing the first column of the current table
-            pkeys = self._get_keys(table_data[table_name], 0)
+            pkeys = self._get_keys(table_data.get(table_name, empty_set), 0)
 
             for next_table, next_schema in schema.items():
                 if next_table in processed_foreigns or (parent is not None and next_table == parent):
