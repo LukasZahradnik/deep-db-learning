@@ -18,6 +18,7 @@ class FITRelationalDataset(DBDataset):
         root: str,
         strategy: BaseStrategy,
         target_table: Optional[str] = None,
+        target_column: Optional[str] = None,
         schema: Optional[Schema] = None,
         convertor: Optional[SchemaConvertor] = None,
         dim: Optional[int] = None,
@@ -29,11 +30,13 @@ class FITRelationalDataset(DBDataset):
         if target_table is None:
             try:
                 target_table = FIT_DATASET_DEFAULTS[database].target_table
+                target_column = FIT_DATASET_DEFAULTS[database].target_column
             except KeyError:
                 raise KeyError(f"Relational FIT database '{database}' is unknown. Please explicitly specify target_table.")
 
         super().__init__(database=database,
                          target_table=target_table,
+                         target_column=target_column,
                          connection_url=connection_url,
                          root=root,
                          strategy=strategy,

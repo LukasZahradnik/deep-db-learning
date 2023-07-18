@@ -15,16 +15,17 @@ class BFSStrategy(BaseStrategy):
     def _get_keys(self, data, index: int):
         return [d[index] for d in data]
 
-    def get_db_data(self, idx: int, connection: Connection, target_table: str, schema: Schema) -> Dict[str, Set[Tuple[Any, ...]]]:
+    def get_db_data(self, idx: int, connection: Connection, target_table: str, schema: Schema) -> Tuple[Dict[str, Set[Tuple[Any, ...]]], Any]:
         queue = [(target_table, 0, None, None, None)]
         empty_set = set()
         table_data = defaultdict(lambda: set())
+        target_row = None
 
         while len(queue) != 0:
             table_name, depth, parent, key, keys = queue.pop(0)
 
             if depth >= self.max_depth:
-                return table_data
+                return table_data, target_row
 
             col_to_index = {col: index for index, col in enumerate(schema[table_name].columns)}
 
@@ -34,7 +35,11 @@ class BFSStrategy(BaseStrategy):
             else:
                 query = select("*", table_obj).where(column(key).in_(set(keys)))
 
-            for res in connection.execute(query).all():
+            results = connection.execute(query).all()
+            if depth == 0:
+                target_row = results[0]
+
+            for res in results:
                 table_data[table_name].add(res.tuple())
 
             if depth + 1 == self.max_depth:
@@ -58,4 +63,4 @@ class BFSStrategy(BaseStrategy):
                     if foreign_key.ref_table == table_name:
                         queue.append((next_table, depth + 1, table_name, foreign_key.columns[0], pkeys))
 
-        return table_data
+        return table_data, target_row

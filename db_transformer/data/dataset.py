@@ -42,6 +42,7 @@ class DBDataset(Dataset):
         self,
         database: str,
         target_table: str,
+        target_column: str,
         connection_url: Union[str, URL],
         root: str,
         strategy: BaseStrategy,
@@ -55,6 +56,7 @@ class DBDataset(Dataset):
         self.schema = schema
         self.database = database
         self.target_table = target_table
+        self.target_column = target_column
 
         self.upstream_connection_url = connection_url
         self.connection: Optional[Connection] = None
@@ -70,6 +72,7 @@ class DBDataset(Dataset):
         self.processed_data = []
         self._length = 0
         self.strategy = strategy
+        self.label_convertor = None
 
         if convertor is not None and dim is not None:
             raise ValueError("If convertor is specified, then dim must not be specified.")
@@ -169,6 +172,13 @@ class DBDataset(Dataset):
 
             self.schema = self._create_schema_analyzer(self.connection).guess_schema()
 
+        self.convertor.create(self.schema)
+
+        target_col = self.schema[self.target_table].columns[self.target_column]
+        if isinstance(target_col, CategoricalColumnDef):
+            self.label_convertor = CatConvertor(1)
+            self.label_convertor.create(target_col)
+
         self._length = get_table_len(self.target_table, self.connection)
 
     @property
@@ -179,7 +189,7 @@ class DBDataset(Dataset):
     def processed_file_names(self) -> Union[str, List[str], Tuple]:
         return [f"{self.database}.{self.target_table}.meta"]
 
-    def get_as_dict(self, idx: int) -> Dict[str, Set[Tuple[Any, ...]]]:
+    def get_as_dict(self, idx: int) -> Tuple[Dict[str, Set[Tuple[Any, ...]]], Any]:
         if self.connection is None:
             self.connection = Connection(create_engine(self.connection_url))
 
@@ -187,15 +197,21 @@ class DBDataset(Dataset):
         return self.strategy.get_db_data(idx, self.connection, self.target_table, self.schema)
 
     def get(self, idx: int) -> BaseData:
-        data = self.get_as_dict(idx)
-        return self._to_hetero_data(data)
+        data, target_row = self.get_as_dict(idx)
+        return self._to_hetero_data(data, target_row)
 
-    def _to_hetero_data(self, data) -> HeteroData:
+    def _to_hetero_data(self, data, target_row) -> HeteroData:
         assert self.schema is not None
         hetero_data = HeteroData()
         primary_keys = defaultdict(dict)
 
-        self.convertor.create(self.schema)
+        col_to_index = {col_name: i for i, col_name in enumerate(self.schema[self.target_table].columns.keys())}
+        label = target_row[col_to_index[self.target_column]]
+
+        if self.label_convertor is not None:
+            hetero_data.y = self.label_convertor.to_one_hot(label)
+        else:
+            hetero_data.y = torch.tensor(float(label))
 
         for table_name, table_data in data.items():
             table_tensor_data = []
@@ -224,7 +240,6 @@ class DBDataset(Dataset):
             else:
                 if table_primary_keys:
                     primary_keys[table_name] = table_primary_keys
-                print(table_tensor_data, table_data, table_name)
                 hetero_data[table_name].x = torch.stack(table_tensor_data)
 
         for table_name, table_data in data.items():

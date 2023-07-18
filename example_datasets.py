@@ -21,6 +21,8 @@ dataset_name: DatasetName = args.dataset
 if dataset_name == "mutagenesis":
     dataset = FITRelationalDataset(dataset_name, ".", dim=32, strategy=BFSStrategy(args.depth if args.depth is not None else 18))
     print(dataset.schema)
+    print(dataset.get(0))
+    print(dataset.get(6))
 
 # # NOTE: large database!
 # #
