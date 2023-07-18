@@ -255,7 +255,7 @@ class DBDataset(Dataset):
             else:
                 if table_primary_keys:
                     primary_keys[table_name] = table_primary_keys
-                hetero_data[table_name].x = torch.stack(table_tensor_data)
+                hetero_data[table_name].x = torch.flatten(torch.stack(table_tensor_data), 1)
 
         for table_name, table_data in data.items():
             col_to_index = {col_name: i for i, col_name in enumerate(self.schema[table_name].columns.keys())}
