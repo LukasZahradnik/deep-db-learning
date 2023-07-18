@@ -73,22 +73,27 @@ class DBDataset(Dataset):
         self._length = 0
         self.strategy = strategy
         self.label_convertor = None
+        self.ones = torch.ones((1, dim))  # Label placeholder
 
         if convertor is not None and dim is not None:
             raise ValueError("If convertor is specified, then dim must not be specified.")
         elif dim is not None:
             # TODO: Temporary
-            self.convertor = PerTypeConvertor({
-                KeyColumnDef: lambda: None,  # skip warnings
-                ForeignKeyColumnDef: lambda: None,  # skip warnings
-                OmitColumnDef: lambda: None,  # skip warnings
-                NumericColumnDef: lambda: NumConvertor(dim),
-                CategoricalColumnDef: lambda: CatConvertor(dim),
-                DateColumnDef: lambda: DateConvertor(dim, segments=['year', 'month', 'day']),
-                # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
-                DateTimeColumnDef: lambda: DateTimeConvertor(dim, segments=['year', 'month', 'day', 'total_seconds']),
-                # DurationColumnDef: lambda: DurationConvertor(dim),
-            })
+            self.convertor = PerTypeConvertor(
+                {
+                    KeyColumnDef: lambda: None,  # skip warnings
+                    ForeignKeyColumnDef: lambda: None,  # skip warnings
+                    OmitColumnDef: lambda: None,  # skip warnings
+                    NumericColumnDef: lambda: NumConvertor(dim),
+                    CategoricalColumnDef: lambda: CatConvertor(dim),
+                    DateColumnDef: lambda: DateConvertor(dim, segments=["year", "month", "day"]),
+                    # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
+                    DateTimeColumnDef: lambda: DateTimeConvertor(
+                        dim, segments=["year", "month", "day", "total_seconds"]
+                    ),
+                    # DurationColumnDef: lambda: DurationConvertor(dim),
+                }
+            )
         elif convertor is not None:
             self.convertor = convertor
         else:
@@ -136,9 +141,11 @@ class DBDataset(Dataset):
 
     def download(self):
         if not self.has_download:
-            raise RuntimeError(f"This {self.__class__.__name__} was initialized with download=False, so "
-                               "the upstream database is accessed directly instead of downloading. "
-                               "download() thus shouldn't be executed.")
+            raise RuntimeError(
+                f"This {self.__class__.__name__} was initialized with download=False, so "
+                "the upstream database is accessed directly instead of downloading. "
+                "download() thus shouldn't be executed."
+            )
 
         if self.connection is None:
             self.connection = Connection(create_engine(self.local_connection_url))
@@ -148,8 +155,11 @@ class DBDataset(Dataset):
                 if self._verbose:
                     print("Copying database...", file=sys.stderr)
 
-                copy_database(src_inspector=self._create_inspector(upstream_connection), dst=self.connection,
-                              verbose=self._verbose)
+                copy_database(
+                    src_inspector=self._create_inspector(upstream_connection),
+                    dst=self.connection,
+                    verbose=self._verbose,
+                )
         except Exception as e:
             self.connection.close()
 
@@ -222,13 +232,18 @@ class DBDataset(Dataset):
                     process_cols.append((i, col_name, col))
 
             primary_col = [
-                i for i, col_name in enumerate(self.schema[table_name].columns.keys()) if self.schema[table_name].columns.is_in_primary_key(col_name)
+                i
+                for i, col_name in enumerate(self.schema[table_name].columns.keys())
+                if self.schema[table_name].columns.is_in_primary_key(col_name)
             ]
             table_primary_keys = {}
 
             for index, row in enumerate(table_data):
                 row_tensor_data = [
-                    self.convertor(row[i], table_name, col_name, col) for i, col_name, col in process_cols
+                    self.ones
+                    if table_name == self.target_table and col_name == self.target_column and row == target_row
+                    else self.convertor(row[i], table_name, col_name, col)
+                    for i, col_name, col in process_cols
                 ]
 
                 if not row_tensor_data:
