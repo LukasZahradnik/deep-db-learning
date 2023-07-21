@@ -105,6 +105,7 @@ class SchemaAnalyzer:
                  connection: Union[Connection, DBInspector, DBInspectorInterface],
                  omit_filters: Union[SetFilterProtocol[Tuple[str, str]],
                                      Iterable[Tuple[str, str]], Tuple[str, str], None] = None,
+                 target: Optional[Tuple[str, str]] = None,
                  verbose=False,
                  ) -> None:
         """
@@ -117,6 +118,7 @@ e.g. specify database tables or table columns to be completely ignored.
 all that is *excluded* will receive the :py:class:`OmitColumnDef` type
             c) a callable which, given a set of values, returns their subset. In this case all that is *excluded* will receive \
 the :py:class:`OmitColumnDef` type
+        :field target: Tuple of (table_name, column_name) for the target table and column
         :field verbose: If true, will show executed `SELECT` statements, as well as a per-table progress bar.
         """
 
@@ -132,6 +134,8 @@ the :py:class:`OmitColumnDef` type
                 f"database is neither {Connection.__name__}, nor an implementation of {DBInspectorInterface.__name__}: {connection}")
 
         self._inspector = inspector
+
+        self._target = target
 
         if isinstance(omit_filters, tuple):
             omit_filters = [omit_filters]
@@ -210,7 +214,7 @@ the :py:class:`OmitColumnDef` type
         except OperationalError:
             return None
 
-    def do_guess_column_type(self, table: str, column: str, in_primary_key: bool, col_type: TypeEngine) -> Type[ColumnDef]:
+    def do_guess_column_type(self, table: str, column: str, in_primary_key: bool, must_have_type: bool, col_type: TypeEngine) -> Type[ColumnDef]:
         """
         Determine the :py:class:`ColumnDef` subclass to use with the given table column, based on the 
         SQL column type, the values of the data, and other heuristics.
@@ -229,7 +233,7 @@ the :py:class:`OmitColumnDef` type
             cardinality = self.query_no_distinct(table, column)
 
             # first check if it is an ID-like column name
-            if cardinality is not None and self.ID_NAME_REGEX.search(column):
+            if not must_have_type and cardinality is not None and self.ID_NAME_REGEX.search(column):
                 n_nonnull = self.query_no_nonnull(table, column)
 
                 # check if there are too many distinct values compared to total
@@ -296,23 +300,30 @@ the :py:class:`OmitColumnDef` type
         col_type = self.db_inspector.get_columns(table)[column]
         pk = self.db_inspector.get_primary_key(table)
         is_in_pk = column in pk
+        must_have_type = (table, column) == self._target
 
-        if is_in_pk and len(pk) == 1:
-            # This is the only primary key column.
-            # The column is thus most likely purely an identifier of the row, without holding any extra information,
-            # whereas if there are more columns part of the primary key, then we can more likely assume that it conveys more information.
+        if not must_have_type:
+            if is_in_pk and len(pk) == 1:
+                # This is the only primary key column.
+                # The column is thus most likely purely an identifier of the row, without holding any extra information,
+                # whereas if there are more columns part of the primary key, then we can more likely assume that it conveys more information.
 
-            # Thus, we will mark this with the "purely a primary key" ColumnDef.
-            return KeyColumnDef(key=True)
+                # Thus, we will mark this with the "purely a primary key" ColumnDef.
+                return KeyColumnDef(key=True)
 
-        # if the column is part of a foreign key constraint, return "foreign_key" ColumnDef
-        # instead of the actual column type.
-        fks = self._get_all_foreign_key_columns(table)
-        if column in fks:
-            return ForeignKeyColumnDef(key=is_in_pk)
+            # if the column is part of a foreign key constraint, return "foreign_key" ColumnDef
+            # instead of the actual column type.
+            fks = self._get_all_foreign_key_columns(table)
+            if column in fks:
+                return ForeignKeyColumnDef(key=is_in_pk)
 
         # delegate to other methods
-        guessed_type = self.do_guess_column_type(table, column, in_primary_key=is_in_pk, col_type=col_type)
+        guessed_type = self.do_guess_column_type(
+            table, column, in_primary_key=is_in_pk, must_have_type=must_have_type, col_type=col_type)
+
+        if must_have_type and isinstance(guessed_type, (OmitColumnDef, KeyColumnDef, ForeignKeyColumnDef)):
+            raise TypeError(f"Column '{column}' in table '{table}' cannot be omitted.")
+
         return self.instantiate_column_type(table, column, in_primary_key=is_in_pk, cls=guessed_type)
 
     def guess_schema(self) -> Schema:

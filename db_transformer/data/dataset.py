@@ -9,9 +9,6 @@ import torch
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.data.data import BaseData
 
-from db_transformer.db import SchemaAnalyzer
-from db_transformer.db.db_inspector import DBInspector
-from db_transformer.helpers.database import copy_database, get_table_len
 from db_transformer.data.convertor import (
     CatConvertor,
     DateConvertor,
@@ -23,6 +20,9 @@ from db_transformer.data.convertor import (
 )
 from db_transformer.data.convertor.schema_convertor import SchemaConvertor
 from db_transformer.data.strategy.strategy import BaseStrategy
+from db_transformer.db import SchemaAnalyzer
+from db_transformer.db.db_inspector import DBInspector
+from db_transformer.helpers.database import copy_database, get_table_len
 from db_transformer.schema import (
     CategoricalColumnDef,
     DateColumnDef,
@@ -87,11 +87,11 @@ class DBDataset(Dataset):
                     NumericColumnDef: lambda: NumConvertor(dim),
                     CategoricalColumnDef: lambda: CatConvertor(dim),
                     DateColumnDef: lambda: DateConvertor(dim, segments=["year", "month", "day"]),
-                    # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
+                    # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),  # TODO
                     DateTimeColumnDef: lambda: DateTimeConvertor(
                         dim, segments=["year", "month", "day", "total_seconds"]
                     ),
-                    # DurationColumnDef: lambda: DurationConvertor(dim),
+                    # DurationColumnDef: lambda: DurationConvertor(dim),  # TODO
                 }
             )
         elif convertor is not None:
@@ -168,7 +168,9 @@ class DBDataset(Dataset):
             raise e
 
     def _create_schema_analyzer(self, connection: Connection) -> SchemaAnalyzer:
-        return SchemaAnalyzer(self._create_inspector(connection), verbose=self._verbose)
+        return SchemaAnalyzer(self._create_inspector(connection),
+                              target=(self.target_table, self.target_column),
+                              verbose=self._verbose)
 
     def process(self):
         if self.connection is None:
