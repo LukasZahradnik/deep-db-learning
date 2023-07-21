@@ -8,8 +8,6 @@ from .schema import named_column_def
 
 __all__ = [
     'ColumnDef',
-    'KeyColumnDef',
-    'ForeignKeyColumnDef',
     'CategoricalColumnDef',
     'NumericColumnDef',
     'DateColumnDef',
@@ -38,21 +36,6 @@ class _AttrsColumnDef(ColumnDef):
     key: bool = field(default=False, validator=attrs.validators.instance_of(bool))
     """Whether the column is part of the table's primary key"""
 
-
-@named_column_def('key')
-@define(kw_only=True)
-class KeyColumnDef(ColumnDef):
-    key: bool = field(default=True, validator=attrs.validators.and_(attrs.validators.instance_of(bool), attrs.validators.in_([True])))
-    """Whether the column is part of the table's primary key"""
-
-
-@named_column_def('foreign_key')
-@define(kw_only=True)
-class ForeignKeyColumnDef(_AttrsColumnDef):
-    """
-    Foreign key column definition - will be interpreted as a foreign key column by the machine learning pipeline.
-    """
-    pass
 
 @named_column_def('cat')
 @define(kw_only=True)

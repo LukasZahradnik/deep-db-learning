@@ -28,8 +28,6 @@ from db_transformer.schema import (
     DateColumnDef,
     DateTimeColumnDef,
     DurationColumnDef,
-    ForeignKeyColumnDef,
-    KeyColumnDef,
     NumericColumnDef,
     OmitColumnDef,
     Schema,
@@ -81,8 +79,6 @@ class DBDataset(Dataset):
             # TODO: Temporary
             self.convertor = PerTypeConvertor(
                 {
-                    KeyColumnDef: lambda: None,  # skip warnings
-                    ForeignKeyColumnDef: lambda: None,  # skip warnings
                     OmitColumnDef: lambda: None,  # skip warnings
                     NumericColumnDef: lambda: NumConvertor(dim),
                     CategoricalColumnDef: lambda: CatConvertor(dim),

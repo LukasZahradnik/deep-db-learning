@@ -40,9 +40,7 @@ from db_transformer.schema import (
     DateColumnDef,
     DateTimeColumnDef,
     DurationColumnDef,
-    ForeignKeyColumnDef,
     ForeignKeyDef,
-    KeyColumnDef,
     NumericColumnDef,
     OmitColumnDef,
     Schema,
@@ -280,7 +278,7 @@ the :py:class:`OmitColumnDef` type
             assert cardinality is not None, f"Column {table}.{column} was determined to be categorical but cardinality cannot be retrieved."
             return CategoricalColumnDef(key=in_primary_key, card=cardinality)
 
-        if cls in {KeyColumnDef, ForeignKeyColumnDef, NumericColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef, OmitColumnDef, TextColumnDef}:
+        if cls in {NumericColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef, OmitColumnDef, TextColumnDef}:
             return cls(key=in_primary_key)
 
         raise TypeError(f"No logic for instantiating {cls.__name__} has been provided to {SchemaAnalyzer.__name__}.")
@@ -308,20 +306,20 @@ the :py:class:`OmitColumnDef` type
                 # The column is thus most likely purely an identifier of the row, without holding any extra information,
                 # whereas if there are more columns part of the primary key, then we can more likely assume that it conveys more information.
 
-                # Thus, we will mark this with the "purely a primary key" ColumnDef.
-                return KeyColumnDef(key=True)
+                # Thus, we will mark this as "omit", to signify that this column should not be a feature
+                return OmitColumnDef(key=True)
 
-            # if the column is part of a foreign key constraint, return "foreign_key" ColumnDef
-            # instead of the actual column type.
+            # if the column is part of a foreign key constraint, return "omit" ColumnDef
+            # instead of the actual column type, as it most likely should not be a feature
             fks = self._get_all_foreign_key_columns(table)
             if column in fks:
-                return ForeignKeyColumnDef(key=is_in_pk)
+                return OmitColumnDef(key=is_in_pk)
 
         # delegate to other methods
         guessed_type = self.do_guess_column_type(
             table, column, in_primary_key=is_in_pk, must_have_type=must_have_type, col_type=col_type)
 
-        if must_have_type and isinstance(guessed_type, (OmitColumnDef, KeyColumnDef, ForeignKeyColumnDef)):
+        if must_have_type and isinstance(guessed_type, OmitColumnDef):
             raise TypeError(f"Column '{column}' in table '{table}' cannot be omitted.")
 
         return self.instantiate_column_type(table, column, in_primary_key=is_in_pk, cls=guessed_type)
