@@ -7,11 +7,11 @@ from db_transformer.schema.columns import ColumnDef
 _TColumnDef = TypeVar('_TColumnDef', bound=ColumnDef)
 
 __all__ = [
-    'ColumnConvertor',
+    'ColumnEmbedder',
 ]
 
 
-class ColumnConvertor(Generic[_TColumnDef], ABC):
+class ColumnEmbedder(torch.nn.Module, Generic[_TColumnDef], ABC):
     @abstractmethod
     def create(self, column_def: _TColumnDef):
         pass

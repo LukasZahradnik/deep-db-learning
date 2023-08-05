@@ -25,10 +25,10 @@ _TSegment = TypeVar('_TSegment', bound=str)
 
 
 class _SegmentedConvertor(ColumnConvertor[_TColumnDef], Generic[_TColumnDef, _TSegment], ABC):
-    def __init__(self, dim: int, segments: List[_TSegment]) -> None:
+    def __init__(self, segments: List[_TSegment]) -> None:
         super().__init__()
         self.segment_convertors = torch.nn.ModuleDict({
-            segment: NumConvertor(dim) for segment in segments
+            segment: NumConvertor() for segment in segments
         })
 
         if len(self.segment_convertors) == 0:
@@ -133,9 +133,9 @@ class DateTimeConvertor(_SegmentedConvertor[DateTimeColumnDef, DateTimeSegment])
 
 
 class DurationConvertor(ColumnConvertor[DurationColumnDef]):
-    def __init__(self, dim: int) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.num = NumConvertor(dim)
+        self.num = NumConvertor()
 
     def create(self, column_def: DurationColumnDef):
         self.num.create(None)

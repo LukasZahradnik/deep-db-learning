@@ -71,7 +71,7 @@ class DBDataset(Dataset):
         self._length = 0
         self.strategy = strategy
         self.label_convertor = None
-        self.ones = torch.ones((1, dim))  # Label placeholder
+        self.ones = torch.tensor([1])  # Label placeholder
 
         if convertor is not None and dim is not None:
             raise ValueError("If convertor is specified, then dim must not be specified.")
@@ -80,14 +80,14 @@ class DBDataset(Dataset):
             self.convertor = PerTypeConvertor(
                 {
                     OmitColumnDef: lambda: None,  # skip warnings
-                    NumericColumnDef: lambda: NumConvertor(dim),
-                    CategoricalColumnDef: lambda: CatConvertor(dim),
-                    DateColumnDef: lambda: DateConvertor(dim, segments=["year", "month", "day"]),
-                    # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),  # TODO
-                    DateTimeColumnDef: lambda: DateTimeConvertor(
-                        dim, segments=["year", "month", "day", "total_seconds"]
-                    ),
-                    # DurationColumnDef: lambda: DurationConvertor(dim),  # TODO
+                    NumericColumnDef: lambda: NumConvertor(),
+                    CategoricalColumnDef: lambda: CatConvertor(),
+                    DateColumnDef: lambda: None, # DateConvertor(dim, segments=["year", "month", "day"]),
+                    # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
+                    DateTimeColumnDef: lambda: None, # DateTimeConvertor(
+                        # dim, segments=["year", "month", "day", "total_seconds"]
+                    # ),
+                    # DurationColumnDef: lambda: DurationConvertor(dim),
                 }
             )
         elif convertor is not None:
@@ -184,7 +184,7 @@ class DBDataset(Dataset):
 
         target_col = self.schema[self.target_table].columns[self.target_column]
         if isinstance(target_col, CategoricalColumnDef):
-            self.label_convertor = CatConvertor(1)
+            self.label_convertor = CatConvertor()
             self.label_convertor.create(target_col)
 
         self._length = get_table_len(self.target_table, self.connection)

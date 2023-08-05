@@ -1,22 +1,22 @@
 from typing import Callable, Dict, Optional, Type
 import warnings
 import torch
-from .columns.column_convertor import ColumnConvertor
+from .columns.column_embedder import ColumnEmbedder
 from db_transformer.schema.columns import ColumnDef
 from db_transformer.schema.schema import Schema
-from .schema_convertor import SchemaConvertor
+from .schema_embedder import SchemaEmbedder
 
 
 __all__ = [
-    'PerTypeConvertor',
+    'PerTypeEmbedder',
 ]
 
 
-class PerTypeConvertor(SchemaConvertor):
-    def __init__(self, factories: Dict[Type[ColumnDef], Callable[[], Optional[ColumnConvertor]]]):
+class PerTypeEmbedder(SchemaEmbedder):
+    def __init__(self, factories: Dict[Type[ColumnDef], Callable[[], Optional[ColumnEmbedder]]]):
         super().__init__()
         self.factories = factories
-        self.column_convertors = {}
+        self.column_embedders = torch.nn.ModuleDict()
 
     def create(self, schema: Schema):
         for table_name, table_schema in schema.items():
@@ -31,23 +31,23 @@ class PerTypeConvertor(SchemaConvertor):
                         break
 
                 if factory is None:
-                    warnings.warn(f"Columns of type {column_def} are missing a convertor.")
+                    warnings.warn(f"Columns of type {column_def} are missing a embedder.")
                 else:
                     try:
-                        convertor = factory()
-                        if convertor is not None:
-                            convertor.create(column_def)
+                        embedder = factory()
+                        if embedder is not None:
+                            embedder.create(column_def)
                     except Exception as e:
                         raise Exception(
-                            f"Creating convertor for column {table_name}.{column_name} failed") from e
-                    if convertor is not None:
-                        self.column_convertors[key] = convertor
+                            f"Creating embedder for column {table_name}.{column_name} failed") from e
+                    if embedder is not None:
+                        self.column_embedders[key] = embedder
 
     def has(self, table_name: str, column_name: str, column: ColumnDef) -> bool:
         key = table_name + '/' + column_name
-        return key in self.column_convertors
+        return key in self.column_embedders
 
     def forward(self, value, table_name: str, column_name: str, column: ColumnDef) -> torch.Tensor:
         key = table_name + '/' + column_name
         assert self.has(table_name, column_name, column)
-        return self.column_convertors[key].forward(value)
+        return self.column_embedders[key].forward(value)

@@ -6,11 +6,11 @@ from db_transformer.schema.schema import Schema
 
 
 __all__ = [
-    'SchemaConvertor',
+    'SchemaEmbedder',
 ]
 
 
-class SchemaConvertor(ABC):
+class SchemaEmbedder(torch.nn.Module, ABC):
     @abstractmethod
     def create(self, schema: Schema):
         pass
@@ -22,6 +22,3 @@ class SchemaConvertor(ABC):
     @abstractmethod
     def forward(self, value, table_name: str, column_name: str, column: ColumnDef) -> torch.Tensor:
         pass
-
-    def __call__(self, value, table_name: str, column_name: str, column: ColumnDef) -> torch.Tensor:
-        return self.forward(value, table_name, column_name, column)

@@ -11,30 +11,27 @@ __all__ = [
 
 
 class CatConvertor(ColumnConvertor[CategoricalColumnDef]):
-    def __init__(self, dim: int) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.dim = dim
 
-        self.embedding: torch.nn.Embedding
         self.classes = 0
         self.value_to_idx = {None: 0}  # index zero reserved for None values
 
     def create(self, column_def: CategoricalColumnDef):
         self.classes = column_def.card
-        self.embedding = torch.nn.Embedding(column_def.card + 1, self.dim)  # + 1 for None values
 
     def forward(self, value) -> torch.Tensor:
         if value not in self.value_to_idx:
             self.value_to_idx[value] = len(self.value_to_idx)
         index = self.value_to_idx[value]
 
-        if index >= self.embedding.num_embeddings:
+        if index >= self.classes:
             raise ValueError(
                 f"Found at least {len(self.value_to_idx)} unique values "
-                f"(expected cardinality: {self.embedding.num_embeddings}). "
+                f"(expected cardinality: {self.classes}). "
                 f"The values are: {list(self.value_to_idx.keys())}")
 
-        return self.embedding(torch.tensor(index)).unsqueeze(dim=0)
+        return torch.tensor([index])
 
     def to_one_hot(self, value) -> torch.Tensor:
         if value not in self.value_to_idx:
