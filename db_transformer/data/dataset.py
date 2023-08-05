@@ -46,8 +46,6 @@ class DBDataset(Dataset):
         strategy: BaseStrategy,
         download: bool,
         schema: Optional[Schema] = None,
-        convertor: Optional[SchemaConvertor] = None,
-        dim: Optional[int] = None,
         verbose=True,
     ):
         # if the schema is None, it will be processed in the `process` method.
@@ -73,27 +71,19 @@ class DBDataset(Dataset):
         self.label_convertor = None
         self.ones = torch.tensor([1])  # Label placeholder
 
-        if convertor is not None and dim is not None:
-            raise ValueError("If convertor is specified, then dim must not be specified.")
-        elif dim is not None:
-            # TODO: Temporary
-            self.convertor = PerTypeConvertor(
-                {
-                    OmitColumnDef: lambda: None,  # skip warnings
-                    NumericColumnDef: lambda: NumConvertor(),
-                    CategoricalColumnDef: lambda: CatConvertor(),
-                    DateColumnDef: lambda: None, # DateConvertor(dim, segments=["year", "month", "day"]),
-                    # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
-                    DateTimeColumnDef: lambda: None, # DateTimeConvertor(
-                        # dim, segments=["year", "month", "day", "total_seconds"]
-                    # ),
-                    # DurationColumnDef: lambda: DurationConvertor(dim),
-                }
-            )
-        elif convertor is not None:
-            self.convertor = convertor
-        else:
-            raise ValueError("Either convertor or dim must be specified.")
+        self.convertor = PerTypeConvertor(
+            {
+                OmitColumnDef: lambda: None,  # skip warnings
+                NumericColumnDef: lambda: NumConvertor(),
+                CategoricalColumnDef: lambda: CatConvertor(),
+                DateColumnDef: lambda: None, # DateConvertor(dim, segments=["year", "month", "day"]),
+                # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
+                DateTimeColumnDef: lambda: None, # DateTimeConvertor(
+                    # dim, segments=["year", "month", "day", "total_seconds"]
+                # ),
+                # DurationColumnDef: lambda: DurationConvertor(dim),
+            }
+        )
 
         super().__init__(root)  # initialize NOW before we guess the schema !
 

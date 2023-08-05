@@ -20,8 +20,6 @@ class FITRelationalDataset(DBDataset):
         target_table: Optional[str] = None,
         target_column: Optional[str] = None,
         schema: Optional[Schema] = None,
-        convertor: Optional[SchemaConvertor] = None,
-        dim: Optional[int] = None,
         verbose=True,
         connector: str = "mariadb+mariadbconnector",
     ):
@@ -41,14 +39,12 @@ class FITRelationalDataset(DBDataset):
                          root=root,
                          strategy=strategy,
                          download=True,
-                         convertor=convertor,
-                         dim=dim,
                          verbose=verbose,
                          schema=schema)
 
 
 if __name__ == "__main__":
-    test_dataset = FITRelationalDataset("mutagenesis", ".", dim=32, strategy=BFSStrategy(1))
+    test_dataset = FITRelationalDataset("mutagenesis", ".", strategy=BFSStrategy(1))
     # test_dataset = FITRelationalDataset('mutagenesis', target_table=None, root='.', strategy=BFSStrategy(18), dim=32)
     print(test_dataset.schema)
     print(test_dataset.len())
