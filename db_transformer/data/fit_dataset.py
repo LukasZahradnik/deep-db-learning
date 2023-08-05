@@ -22,6 +22,7 @@ class FITRelationalDataset(DBDataset):
         schema: Optional[Schema] = None,
         verbose=True,
         connector: str = "mariadb+mariadbconnector",
+        cache_in_memory: bool = False,
     ):
         connection_url = f"{connector}://guest:relational@relational.fit.cvut.cz:3306/{database}"
 
@@ -40,7 +41,8 @@ class FITRelationalDataset(DBDataset):
                          strategy=strategy,
                          download=True,
                          verbose=verbose,
-                         schema=schema)
+                         schema=schema,
+                         cache_in_memory=cache_in_memory)
 
 
 if __name__ == "__main__":

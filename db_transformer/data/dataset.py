@@ -8,6 +8,7 @@ from sqlalchemy.engine.url import URL
 import torch
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.data.data import BaseData
+import torch_geometric.transforms as T
 
 from db_transformer.data.convertor import (
     CatConvertor,
@@ -47,6 +48,7 @@ class DBDataset(Dataset):
         download: bool,
         schema: Optional[Schema] = None,
         verbose=True,
+        cache_in_memory=False,
     ):
         # if the schema is None, it will be processed in the `process` method.
         self.schema = schema
@@ -70,6 +72,9 @@ class DBDataset(Dataset):
         self.strategy = strategy
         self.label_convertor = None
         self.ones = torch.tensor([1])  # Label placeholder
+
+        self.cache_in_memory = cache_in_memory
+        self.cache = []
 
         self.convertor = PerTypeConvertor(
             {
@@ -179,6 +184,9 @@ class DBDataset(Dataset):
 
         self._length = get_table_len(self.target_table, self.connection)
 
+        if self.cache_in_memory:
+            self.cache = [None] * self._length
+
     @property
     def raw_file_names(self) -> Union[str, List[str], Tuple]:
         return [f"{self.database}.db"]
@@ -195,8 +203,16 @@ class DBDataset(Dataset):
         return self.strategy.get_db_data(idx, self.connection, self.target_table, self.schema)
 
     def get(self, idx: int) -> BaseData:
+        if self.cache_in_memory and self.cache[idx] is not None:
+            return self.cache[idx]
+
         data, target_row = self.get_as_dict(idx)
-        return self._to_hetero_data(data, target_row)
+        hetero_data = self._to_hetero_data(data, target_row)
+
+        if self.cache_in_memory:
+            self.cache[idx] = hetero_data
+        return hetero_data
+
 
     def _to_hetero_data(self, data, target_row) -> HeteroData:
         assert self.schema is not None
@@ -267,5 +283,8 @@ class DBDataset(Dataset):
                 hetero_data[table_name, col.columns[0], col.ref_table].edge_index = (
                     torch.tensor(edge_index, dtype=torch.long).t().contiguous()
                 )
+
+        hetero_data = T.ToUndirected()(hetero_data)
+        hetero_data = T.AddSelfLoops()(hetero_data)
 
         return hetero_data
