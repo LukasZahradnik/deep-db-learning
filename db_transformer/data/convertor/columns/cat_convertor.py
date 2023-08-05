@@ -15,7 +15,7 @@ class CatConvertor(ColumnConvertor[CategoricalColumnDef]):
         super().__init__()
 
         self.classes = 0
-        self.value_to_idx = {None: 0}  # index zero reserved for None values
+        self.value_to_idx = {}  # None values should be counted as a category
 
     def create(self, column_def: CategoricalColumnDef):
         self.classes = column_def.card
