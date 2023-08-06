@@ -223,7 +223,7 @@ class DBDataset(Dataset):
         label = target_row[col_to_index[self.target_column]]
 
         if self.label_convertor is not None:
-            hetero_data.y = self.label_convertor.to_one_hot(label)
+            hetero_data.y = torch.argmax(self.label_convertor.to_one_hot(label))
         else:
             hetero_data.y = torch.tensor(float(label))
 
