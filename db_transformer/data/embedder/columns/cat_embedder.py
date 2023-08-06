@@ -21,4 +21,4 @@ class CatEmbedder(ColumnEmbedder[CategoricalColumnDef]):
         self.embedding = torch.nn.Embedding(column_def.card + 1, self.dim)  # + 1 for None values
 
     def forward(self, value) -> torch.Tensor:
-        return self.embedding(value.long()).unsqueeze(dim=0)
+        return self.embedding(value.long())

@@ -82,14 +82,11 @@ class DBTransformer(torch.nn.Module):
                     embedded_cols.append((col_name, col))
 
             d = [
-                torch.concat([
-                    self.embedder(val, table_name, col_name, col)
-                    for val, (col_name, col) in zip(row, embedded_cols)
-                ], dim=1)
-                for row in value
+                self.embedder(value[:, i], table_name, col_name, col)
+                for i, (col_name, col) in enumerate(embedded_cols)
             ]
 
-            new_x_dict[table_name] = torch.stack(d).squeeze(dim=1)
+            new_x_dict[table_name] = torch.concat(d, dim=1)
 
         x_dict = new_x_dict
 

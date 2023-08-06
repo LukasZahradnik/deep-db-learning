@@ -16,10 +16,13 @@ class NumEmbedder(ColumnEmbedder[NumericColumnDef]):
         super().__init__()
         self.dim = dim
 
-        self.weights: torch.nn.Parameter
+        self.linear: torch.nn.Linear
 
     def create(self, column_def: Any):
-        self.weights = torch.nn.Parameter(torch.randn(1, self.dim))
+        self.linear = torch.nn.Linear(1, self.dim)
 
     def forward(self, value) -> torch.Tensor:
-        return self.weights * value
+        if len(value.shape) == 1:
+            value = value.unsqueeze(dim=1)
+
+        return self.linear(value)
