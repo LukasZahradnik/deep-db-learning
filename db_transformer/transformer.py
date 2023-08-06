@@ -44,14 +44,27 @@ class TransformerGNN(MessagePassing):
 
         return x
 
+
+class DBTransformerLayer(torch.nn.Module):
+    def __init__(self, dim, out_channels, metadata, num_heads):
+        super().__init__()
+
+        convs = {m: TransformerGNN(dim, out_channels, num_heads) for m in metadata[1]}
+        self.hetero = HeteroConv(convs, aggr="mean")
+
+    def forward(self, x_dict, edge_index_dict):
+        return self.hetero(x_dict, edge_index_dict)
+
+
 class DBTransformer(torch.nn.Module):
-    def __init__(self, dim, out_channels, metadata, num_heads, out_table, schema):
+    def __init__(self, dim, out_channels, layers, metadata, num_heads, out_table, schema):
         super().__init__()
 
         self.out_table = out_table
         self.out_lin = Linear(dim, out_channels, bias=True)
         self.out_channels = out_channels
         self.dim = dim
+        self.layers = layers
 
         self.schema = schema
         self.embedder = PerTypeEmbedder(
@@ -66,8 +79,11 @@ class DBTransformer(torch.nn.Module):
 
         self.embedder.create(schema)
 
-        convs = {m: TransformerGNN(dim, out_channels, num_heads) for m in metadata[1]}
-        self.hetero = HeteroConv(convs, aggr="mean")
+        self.transformer_layers = torch.nn.ModuleList([
+            DBTransformerLayer(dim, out_channels, metadata, num_heads)
+            for _ in range(layers)
+        ])
+
 
     def forward(self, x_dict, edge_index_dict):
         new_x_dict = {}
@@ -88,9 +104,11 @@ class DBTransformer(torch.nn.Module):
 
             new_x_dict[table_name] = torch.concat(d, dim=1)
 
-        x_dict = new_x_dict
+        x = new_x_dict
 
-        x = self.hetero(x_dict, edge_index_dict)
+        for layer in self.transformer_layers:
+            x = layer(x, edge_index_dict)
+
         x = x[self.out_table]
 
         x = x.reshape((x.shape[0], int(x.shape[1] / self.dim), self.dim))
