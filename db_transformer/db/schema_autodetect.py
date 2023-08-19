@@ -1,17 +1,18 @@
-from functools import lru_cache
 import re
 import sys
+from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 
 import inflect
+import sqlalchemy.sql.functions as fn
 from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMTEXT
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import distinct, select
 from sqlalchemy.sql.expression import null
-import sqlalchemy.sql.functions as fn
 from sqlalchemy.sql.operators import isnot
 from sqlalchemy.types import (
+    TEXT,
     Boolean,
     Date,
     DateTime,
@@ -19,7 +20,6 @@ from sqlalchemy.types import (
     Interval,
     Numeric,
     String,
-    TEXT,
     Text,
     Time,
     TypeEngine,
@@ -48,7 +48,6 @@ from db_transformer.schema import (
     TextColumnDef,
     TimeColumnDef,
 )
-
 
 __all__ = [
     "SchemaAnalyzer"
@@ -119,7 +118,6 @@ the :py:class:`OmitColumnDef` type
         :field target: Tuple of (table_name, column_name) for the target table and column
         :field verbose: If true, will show executed `SELECT` statements, as well as a per-table progress bar.
         """
-
         if isinstance(connection, CachedDBInspector):
             inspector = connection
         elif isinstance(connection, DBInspectorInterface):
@@ -150,25 +148,20 @@ the :py:class:`OmitColumnDef` type
 
     @property
     def connection(self) -> Connection:
-        """
-        The underlying SQLAlchemy `Connection`.
-        """
+        """The underlying SQLAlchemy `Connection`."""
         return self._inspector.connection
 
     @property
     def db_inspector(self) -> CachedDBInspector:
-        """
-        The underlying :py:class:`CachedDBInspector` instance.
-        """
+        """The underlying :py:class:`CachedDBInspector` instance."""
         return self._inspector
 
     @lru_cache(maxsize=None)
     def _get_all_foreign_key_columns(self, table: str) -> Set[str]:
         """
-        A helper function for obtaining a set of all columns of a table that are part of (any) foreign key 
+        A helper function for obtaining a set of all columns of a table that are part of (any) foreign key
         (doesn't say which foreign key - they can be mixed). Caches its outputs using `@lru_cache`.
         """
-
         fks = self.db_inspector.get_foreign_keys(table)
         out = set()
         for fk in fks.keys():
@@ -185,13 +178,12 @@ the :py:class:`OmitColumnDef` type
 
         Caches its outputs using `@lru_cache`.
         """
-
         try:
             tbl = self.db_inspector.get_orm_table(table)
             col = getattr(tbl.c, column)
             query = select(fn.count(distinct(col))).select_from(tbl)
             return self.connection.scalar(query)
-        except OperationalError as e:
+        except OperationalError:
             return None
 
     @lru_cache(maxsize=None)
@@ -203,7 +195,6 @@ the :py:class:`OmitColumnDef` type
 
         Caches its outputs using `@lru_cache`
         """
-
         try:
             tbl = self.db_inspector.get_orm_table(table)
             col = getattr(tbl.c, column)
@@ -214,12 +205,12 @@ the :py:class:`OmitColumnDef` type
 
     def do_guess_column_type(self, table: str, column: str, in_primary_key: bool, must_have_type: bool, col_type: TypeEngine) -> Type[ColumnDef]:
         """
-        Determine the :py:class:`ColumnDef` subclass to use with the given table column, based on the 
+        Determine the :py:class:`ColumnDef` subclass to use with the given table column, based on the
         SQL column type, the values of the data, and other heuristics.
 
         Returns the class itself, not an instance of :py:class:`ColumnDef`.
 
-        You may override this method in order to provide custom logic 
+        You may override this method in order to provide custom logic
         for returning custom :py:class:`ColumnDef` subclasses.
         """
         # check whether this column must be a specific column type
@@ -227,16 +218,21 @@ the :py:class:`OmitColumnDef` type
             if isinstance(col_type, sql_col_types):
                 return output_col_type
 
+        n_nonnull = self.query_no_nonnull(table, column)
+        if n_nonnull == 0:
+            if must_have_type:
+                raise ValueError(f"Column {column} in table {table} contains only NULL values, "
+                                 "but it cannot be omitted as it is the target.")
+            return OmitColumnDef
+
         if isinstance(col_type, (Integer, String)):
             cardinality = self.query_no_distinct(table, column)
 
             # first check if it is an ID-like column name
             if not must_have_type and cardinality is not None and self.ID_NAME_REGEX.search(column):
-                n_nonnull = self.query_no_nonnull(table, column)
 
                 # check if there are too many distinct values compared to total
-                if n_nonnull is not None and (
-                        n_nonnull == 0 or
+                if (n_nonnull is not None and
                         cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
                     return OmitColumnDef
 
@@ -257,7 +253,6 @@ the :py:class:`OmitColumnDef` type
                 if cardinality is None or cardinality > self.STRING_CARDINALITY_THRESHOLD:
                     return TextColumnDef
 
-                n_nonnull = self.query_no_nonnull(table, column)
                 if (n_nonnull is not None and
                         cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
                     return TextColumnDef
@@ -289,7 +284,6 @@ the :py:class:`OmitColumnDef` type
 
         Contains additional logic for foreign keys and filtering based on constructor input.
         """
-
         # omit based on column filters provided in the class constructor
         if (table, column) not in self._not_omitted:
             return OmitColumnDef()
@@ -329,7 +323,6 @@ the :py:class:`OmitColumnDef` type
         Locates all database tables and all columns and runs :py:method:`guess_column_type` for all of them.
         Returns the result as a :py:class:`Schema`.
         """
-
         schema = Schema()
 
         for table in wrap_progress(self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"):
@@ -345,8 +338,10 @@ the :py:class:`OmitColumnDef` type
 
 if __name__ == "__main__":
     import json
-    from db_transformer.helpers.objectpickle import serialize
+
     from sqlalchemy import create_engine
+
+    from db_transformer.helpers.objectpickle import serialize
 
     dataset = "mutagenesis"
 
