@@ -81,7 +81,7 @@ class SchemaAnalyzer:
         r"_id$|^id_|_id_|Id$|Id[^a-z]|[Ii]dentifier|IDENTIFIER|ID[^a-zA-Z]|ID$|[guGU]uid[^a-z]|[guGU]uid$|[GU]UID[^a-zA-Z]|[GU]UID$")
 
     COMMON_NUMERIC_COLUMN_NAME_REGEX = re.compile(
-        r"balance|amount|size|duration|frequency|count|cnt|votes|score|number|age", re.IGNORECASE)  # TODO: add more?
+        r"balance|amount|size|duration|frequency|count|cnt|votes|score|number|age|year|month|day", re.IGNORECASE)  # TODO: add more?
 
     FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.95
     """
