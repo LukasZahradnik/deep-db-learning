@@ -250,6 +250,9 @@ class DBDataset(Dataset):
                     for i, col_name, col in process_cols
                 ]
 
+                if len(row_tensor_data) == 0:
+                    row_tensor_data.append(self.ones)
+
                 if not row_tensor_data:
                     break
 
