@@ -62,6 +62,9 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
     def __getitem__(self, key: str) -> _Value:
         return self.__data[key]
 
+    def __delitem__(self, key: str):
+        del self.__data[key]
+
     def __len__(self) -> int:
         return len(self.__data)
 
