@@ -118,7 +118,7 @@ class DBTransformer(torch.nn.Module):
         for layer in self.transformer_layers:
             x = layer(x, edge_index_dict)
 
-        x = x[self.out_table]
+        x = x["_target_table"]
         x = x[:, 0, :]
         x = self.out_lin(x)
 
