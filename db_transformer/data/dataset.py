@@ -38,17 +38,17 @@ from db_transformer.schema import (
 
 class DBDataset(Dataset):
     def __init__(
-        self,
-        database: str,
-        target_table: str,
-        target_column: str,
-        connection_url: Union[str, URL],
-        root: str,
-        strategy: BaseStrategy,
-        download: bool,
-        schema: Optional[Schema] = None,
-        verbose=True,
-        cache_in_memory=False,
+            self,
+            database: str,
+            target_table: str,
+            target_column: str,
+            connection_url: Union[str, URL],
+            root: str,
+            strategy: BaseStrategy,
+            download: bool,
+            schema: Optional[Schema] = None,
+            verbose=True,
+            cache_in_memory=False,
     ):
         # if the schema is None, it will be processed in the `process` method.
         self.schema = schema
@@ -213,7 +213,6 @@ class DBDataset(Dataset):
             self.cache[idx] = hetero_data
         return hetero_data
 
-
     def _to_hetero_data(self, data, target_row) -> HeteroData:
         assert self.schema is not None
         hetero_data = HeteroData()
@@ -221,6 +220,9 @@ class DBDataset(Dataset):
 
         col_to_index = {col_name: i for i, col_name in enumerate(self.schema[self.target_table].columns.keys())}
         label = target_row[col_to_index[self.target_column]]
+
+        hetero_data["_target_table"].x = torch.tensor([1.0])
+        target_idx = None
 
         if self.label_convertor is not None:
             hetero_data.y = torch.argmax(self.label_convertor.to_one_hot(label))
@@ -243,6 +245,9 @@ class DBDataset(Dataset):
             table_primary_keys = {}
 
             for index, row in enumerate(table_data):
+                if table_name == self.target_table and row == target_row:
+                    target_idx = index
+
                 row_tensor_data = [
                     self.ones
                     if table_name == self.target_table and col_name == self.target_column and row == target_row
@@ -283,9 +288,19 @@ class DBDataset(Dataset):
                         continue
 
                     edge_index.append([i_index, table_primary_keys[row[index]]])
-                hetero_data[table_name, col.columns[0], col.ref_table].edge_index = (
-                    torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-                )
+
+                if edge_index:
+                    hetero_data[table_name, col.columns[0], col.ref_table].edge_index = (
+                        torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+                    )
+                else:
+                    hetero_data[table_name, col.columns[0], col.ref_table].edge_index = (
+                        torch.tensor([[], []], dtype=torch.long)
+                    )
+
+        hetero_data["_target_table", "rel", self.target_table].edge_index = torch.tensor([
+            [0], [target_idx],
+        ], dtype=torch.long)
 
         hetero_data = T.ToUndirected()(hetero_data)
         hetero_data = T.AddSelfLoops()(hetero_data)
