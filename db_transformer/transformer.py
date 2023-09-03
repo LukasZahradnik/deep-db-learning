@@ -13,7 +13,7 @@ class TransformerGNN(MessagePassing):
         self.in_channels = in_channels
 
         self.lin = Linear(in_channels, in_channels, bias=True)
-        self.transformer = torch.nn.TransformerEncoderLayer(self.in_channels, num_heads, dim_feedforward=64)
+        self.transformer = torch.nn.TransformerEncoderLayer(self.in_channels, num_heads, dim_feedforward=64, batch_first=True)
 
         self.b_proj = torch.nn.Linear(in_channels, in_channels)
 
@@ -112,8 +112,7 @@ class DBTransformer(torch.nn.Module):
             x = layer(x, edge_index_dict)
 
         x = x[self.out_table]
-
+        x = x[:, 0, :]
         x = self.out_lin(x)
-        x = torch.sum(x, dim=1)
 
         return torch.softmax(x, dim=1)
