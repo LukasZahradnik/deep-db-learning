@@ -62,6 +62,7 @@ class Embedder(torch.nn.Module):
             }
         )
 
+        self.dim = dim
         self.embedder.create(schema)
 
     def forward(self, table_name, value):
@@ -75,6 +76,9 @@ class Embedder(torch.nn.Module):
             self.embedder(value[:, i], table_name, col_name, col)
             for i, (col_name, col) in enumerate(embedded_cols)
         ]
+
+        if not d:
+            return torch.ones((value.shape[0], 1, self.dim))
 
         return torch.stack(d, dim=1)
 
@@ -101,6 +105,9 @@ class DBTransformer(torch.nn.Module):
     def forward(self, x_dict, edge_index_dict):
         new_x_dict = {}
         for table_name, value in x_dict.items():
+            if table_name == "_target_table":
+                new_x_dict[table_name] = torch.ones((value.shape[0], 1, self.dim))
+
             if table_name not in self.schema:
                 continue
 
