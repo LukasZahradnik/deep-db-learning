@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 import torch
 
 from db_transformer.schema.columns import ColumnDef
@@ -12,7 +13,7 @@ __all__ = [
 
 class SchemaEmbedder(torch.nn.Module, ABC):
     @abstractmethod
-    def create(self, schema: Schema):
+    def create(self, schema: Schema, device: Optional[str] = None):
         pass
 
     @abstractmethod
