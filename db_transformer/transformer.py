@@ -7,13 +7,13 @@ from db_transformer.schema import OmitColumnDef, NumericColumnDef, CategoricalCo
 
 
 class TransformerGNN(MessagePassing):
-    def __init__(self, in_channels, out_channels, num_heads, aggr="mean"):
+    def __init__(self, in_channels, ff_dim, num_heads, aggr="mean"):
         super().__init__(aggr=aggr, node_dim=-3)
 
         self.in_channels = in_channels
 
         self.lin = Linear(in_channels, in_channels, bias=True)
-        self.transformer = torch.nn.TransformerEncoderLayer(self.in_channels, num_heads, dim_feedforward=64, batch_first=True)
+        self.transformer = torch.nn.TransformerEncoderLayer(self.in_channels, num_heads, dim_feedforward=ff_dim, batch_first=True)
 
         self.b_proj = torch.nn.Linear(in_channels, in_channels)
 
@@ -37,11 +37,11 @@ class TransformerGNN(MessagePassing):
 
 
 class DBTransformerLayer(torch.nn.Module):
-    def __init__(self, dim, out_channels, metadata, num_heads):
+    def __init__(self, dim, ff_dim, metadata, num_heads, aggr):
         super().__init__()
 
-        convs = {m: TransformerGNN(dim, out_channels, num_heads) for m in metadata[1]}
-        self.hetero = HeteroConv(convs, aggr="mean")
+        convs = {m: TransformerGNN(dim, ff_dim, num_heads, aggr) for m in metadata[1]}
+        self.hetero = HeteroConv(convs, aggr=aggr)
 
     def forward(self, x_dict, edge_index_dict):
         return self.hetero(x_dict, edge_index_dict)
@@ -84,7 +84,7 @@ class Embedder(torch.nn.Module):
 
 
 class DBTransformer(torch.nn.Module):
-    def __init__(self, dim, out_channels, layers, metadata, num_heads, out_table, schema):
+    def __init__(self, dim, out_channels, ff_dim, layers, metadata, num_heads, out_table, schema, aggr="mean"):
         super().__init__()
 
         self.out_table = out_table
@@ -97,7 +97,7 @@ class DBTransformer(torch.nn.Module):
         self.embedder = Embedder(dim, schema)
 
         self.transformer_layers = torch.nn.ModuleList([
-            DBTransformerLayer(dim, out_channels, metadata, num_heads)
+            DBTransformerLayer(dim, ff_dim, metadata, num_heads, aggr)
             for _ in range(layers)
         ])
 
