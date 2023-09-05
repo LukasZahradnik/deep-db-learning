@@ -65,12 +65,15 @@ class Embedder(torch.nn.Module):
         self.dim = dim
         self.embedder.create(schema)
 
-    def forward(self, table_name, value):
-        embedded_cols = []
+    def get_embed_cols(self, table_name: str):
+        return [
+            (col_name, col)
+            for col_name, col in self.schema[table_name].columns.items()
+            if self.embedder.has(table_name, col_name, col)
+        ]
 
-        for col_name, col in self.schema[table_name].columns.items():
-            if self.embedder.has(table_name, col_name, col):
-                embedded_cols.append((col_name, col))
+    def forward(self, table_name, value):
+        embedded_cols = self.get_embed_cols(table_name)
 
         d = [
             self.embedder(value[:, i], table_name, col_name, col)
@@ -84,10 +87,9 @@ class Embedder(torch.nn.Module):
 
 
 class DBTransformer(torch.nn.Module):
-    def __init__(self, dim, out_channels, ff_dim, layers, metadata, num_heads, out_table, schema, aggr="mean"):
+    def __init__(self, dim, out_channels, ff_dim, layers, metadata, num_heads, schema, aggr="mean"):
         super().__init__()
 
-        self.out_table = out_table
         self.out_lin = Linear(dim, out_channels, bias=True)
         self.out_channels = out_channels
         self.dim = dim
