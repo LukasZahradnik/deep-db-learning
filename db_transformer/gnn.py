@@ -33,7 +33,7 @@ class DBGNN(torch.nn.Module):
         ])
 
         self.table_projection = torch.nn.ModuleDict({
-            key: torch.nn.Linear(len(self.embedder.get_embed_cols(key)) * self.dim, proj_dim)
+            key: torch.nn.Linear(max(len(self.embedder.get_embed_cols(key)), 1) * self.dim, proj_dim)
             for key in self.schema.keys()
         })
 
