@@ -1,13 +1,12 @@
 from attrs import define, field
 import attrs
 
-from .schema import named_column_def
+from .schema import ColumnDef, named_column_def
 
 # Note: `attrs` are used instead of Python's dataclasses because they support additional functionality,
 # specifically kw_only, which is in Python's dataclasses only since Python 3.10.
 
 __all__ = [
-    'ColumnDef',
     'CategoricalColumnDef',
     'NumericColumnDef',
     'DateColumnDef',
@@ -17,13 +16,6 @@ __all__ = [
     'TextColumnDef',
     'OmitColumnDef',
 ]
-
-
-class ColumnDef:
-    """
-    Column definition base class - purely for type checking
-    """
-    pass
 
 
 @define(kw_only=True)

@@ -1,5 +1,4 @@
 import re
-import sys
 from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 
@@ -170,7 +169,7 @@ the :py:class:`OmitColumnDef` type
         return out
 
     @lru_cache(maxsize=None)
-    def query_no_distinct(self, table: str, column: str) -> Optional[int]:
+    def guess_categorical_cardinality(self, table: str, column: str) -> Optional[int]:
         """
         Queries the DB for the total number of distinct values present in a column.
 
@@ -226,7 +225,7 @@ the :py:class:`OmitColumnDef` type
             return OmitColumnDef
 
         if isinstance(col_type, (Integer, String)):
-            cardinality = self.query_no_distinct(table, column)
+            cardinality = self.guess_categorical_cardinality(table, column)
 
             # first check if it is an ID-like column name
             if not must_have_type and cardinality is not None and self.ID_NAME_REGEX.search(column):
@@ -269,7 +268,7 @@ the :py:class:`OmitColumnDef` type
         You may override this method in order to instantiate custom subclasses of :py:class:`ColumnDef` if you've overridden :py:method:`do_guess_column_type`.
         """
         if cls == CategoricalColumnDef:
-            cardinality = self.query_no_distinct(table, column)
+            cardinality = self.guess_categorical_cardinality(table, column)
             assert cardinality is not None, f"Column {table}.{column} was determined to be categorical but cardinality cannot be retrieved."
             return CategoricalColumnDef(key=in_primary_key, card=cardinality)
 

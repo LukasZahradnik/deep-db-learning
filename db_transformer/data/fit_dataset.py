@@ -1,9 +1,11 @@
 from typing import Optional
+
+from sqlalchemy.engine import Connection, Engine, create_engine, make_url
 from sqlalchemy.engine.url import URL
-
+from sqlalchemy.exc import ArgumentError
 from torch_geometric.data.dataset import Union
-from db_transformer.data.convertor.schema_convertor import SchemaConvertor
 
+from db_transformer.data.convertor.schema_convertor import SchemaConvertor
 from db_transformer.data.dataset import DBDataset
 from db_transformer.data.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS
 from db_transformer.data.strategy.bfs import BFSStrategy
@@ -12,6 +14,8 @@ from db_transformer.schema import Schema
 
 
 class FITRelationalDataset(DBDataset):
+    DEFAULT_CONNECTOR = "mariadb+mariadbconnector"
+
     def __init__(
         self,
         database: str,
@@ -21,17 +25,18 @@ class FITRelationalDataset(DBDataset):
         target_column: Optional[str] = None,
         schema: Optional[Schema] = None,
         verbose=True,
-        connector: str = "mariadb+mariadbconnector",
+        connector: str = DEFAULT_CONNECTOR,
         cache_in_memory: bool = False,
     ):
         connection_url = f"{connector}://guest:relational@relational.fit.cvut.cz:3306/{database}"
 
-        if target_table is None:
+        if target_table is None or target_column is None:
             try:
                 target_table = FIT_DATASET_DEFAULTS[database].target_table
                 target_column = FIT_DATASET_DEFAULTS[database].target_column
             except KeyError:
-                raise KeyError(f"Relational FIT database '{database}' is unknown. Please explicitly specify target_table.")
+                raise KeyError(f"Relational FIT database '{database}' is unknown. "
+                               "Please specify target_table and target_column explicitly.")
 
         super().__init__(database=database,
                          target_table=target_table,
@@ -43,6 +48,19 @@ class FITRelationalDataset(DBDataset):
                          verbose=verbose,
                          schema=schema,
                          cache_in_memory=cache_in_memory)
+
+    @classmethod
+    def get_url(cls, dataset: str, connector: str = DEFAULT_CONNECTOR) -> str:
+        return f"{connector}://guest:relational@relational.fit.cvut.cz:3306/{dataset}"
+
+    @classmethod
+    def create_remote_connection(cls, dataset: str, *, connector: str = DEFAULT_CONNECTOR):
+        """Create a new SQLAlchemy Connection instance to the remote database.
+
+        Create a new SQLAlchemy Connection instance to the remote database.
+        Don't forget to close the Connection after you are done using it!
+        """
+        return Connection(create_engine(cls.get_url(dataset, connector)))
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from db_transformer.helpers.collections import OrderedDotDict
 
 
 __all__ = [
+    'ColumnDef',
     'named_column_def',
     'column_def_to_name',
     'ColumnDefSerializer',
@@ -30,6 +31,12 @@ _KNOWN_COLUMN_TYPES: Dict[str, Type] = {}
 
 
 _T = TypeVar('_T')
+
+
+class ColumnDef:
+    """Column definition base class."""
+
+    pass
 
 
 def named_column_def(name: str):
@@ -110,7 +117,7 @@ class ColumnDefDeserializer(TypedDeserializer):
         return super()._get_class(type)
 
 
-class ColumnDefs(OrderedDotDict[Any]):
+class ColumnDefs(OrderedDotDict[ColumnDef]):
     """
     Represents the column definitions of one table.
     It is basically a dictionary of column_name -> `ColumnDef`.
@@ -118,8 +125,8 @@ class ColumnDefs(OrderedDotDict[Any]):
     SERIALIZER = ColumnDefSerializer()
     DESERIALIZER = ColumnDefDeserializer()
 
-    def __setitem__(self, key: str, value: Any):
-        # automatically cast the value to 
+    def __setitem__(self, key: str, value: ColumnDef):
+        # automatically cast the value
         return super().__setitem__(key, self.DESERIALIZER(value) if isinstance(value, dict) else value)
 
     def __getstate__(self) -> object:

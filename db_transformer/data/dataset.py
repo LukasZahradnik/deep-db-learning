@@ -1,14 +1,15 @@
-from collections import defaultdict
 import os.path
 import sys
+from collections import defaultdict
+from os import path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from sqlalchemy.engine import Connection, create_engine
-from sqlalchemy.engine.url import URL
 import torch
+import torch_geometric.transforms as T
+from sqlalchemy.engine import Connection, Engine, create_engine, make_url
+from sqlalchemy.engine.url import URL
 from torch_geometric.data import Dataset, HeteroData
 from torch_geometric.data.data import BaseData
-import torch_geometric.transforms as T
 
 from db_transformer.data.convertor import (
     CatConvertor,
@@ -81,9 +82,11 @@ class DBDataset(Dataset):
                 OmitColumnDef: lambda: None,  # skip warnings
                 NumericColumnDef: lambda: NumConvertor(),
                 CategoricalColumnDef: lambda: CatConvertor(),
-                DateColumnDef: lambda: None, # DateConvertor(dim, segments=["year", "month", "day"]),
+                DateColumnDef: lambda: None,
+                # DateConvertor(dim, segments=["year", "month", "day"]),
                 # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
-                DateTimeColumnDef: lambda: None, # DateTimeConvertor(
+                DateTimeColumnDef: lambda: None, 
+                # DateTimeConvertor(
                     # dim, segments=["year", "month", "day", "total_seconds"]
                 # ),
                 # DurationColumnDef: lambda: DurationConvertor(dim),
@@ -92,10 +95,23 @@ class DBDataset(Dataset):
 
         super().__init__(root)  # initialize NOW before we guess the schema !
 
+    @classmethod
+    def get_default_raw_dir(cls, root: str) -> str:
+        return path.join(root, "raw")
+
+    @classmethod
+    def get_default_local_file(cls, root: str, dataset_name: str) -> str:
+        return path.join(cls.get_default_raw_dir(root), f"{dataset_name}.db")
+
+    @property
+    def raw_dir(self) -> str:
+        assert self.root is not None
+        return self.get_default_raw_dir(self.root)
+
     @property
     def local_file(self) -> str:
-        db_file = f"{self.database}.db"
-        return os.path.join(self.raw_dir, db_file)
+        assert self.root is not None
+        return self.get_default_local_file(root=self.root, dataset_name=self.database)
 
     @property
     def local_connection_url(self) -> Union[str, URL]:
@@ -130,6 +146,26 @@ class DBDataset(Dataset):
     def _create_inspector(self, connection: Connection) -> DBInspector:
         return DBInspector(connection)
 
+    @classmethod
+    def create_connection(cls, engine_or_url: Union[str, URL, Engine], **kwargs) -> Connection:
+        """Create a new SQLAlchemy Connection instance (Don't forget to close it after you are done using it!)."""
+        if isinstance(engine_or_url, Engine):
+            engine = engine_or_url
+        else:
+            engine = create_engine(engine_or_url)
+
+        return Connection(engine)
+
+    @classmethod
+    def create_local_connection(cls, root: str, dataset_name: str) -> Connection:
+        """Create a new SQLAlchemy Connection instance to the local database copy.
+
+        Create a new SQLAlchemy Connection instance to the local database copy.
+        Don't forget to close the Connection after you are done using it!
+        """
+        url = "sqlite:///" + cls.get_default_local_file(root, dataset_name)
+        return Connection(create_engine(url))
+
     def download(self):
         if not self.has_download:
             raise RuntimeError(
@@ -139,10 +175,10 @@ class DBDataset(Dataset):
             )
 
         if self.connection is None:
-            self.connection = Connection(create_engine(self.local_connection_url))
+            self.connection = self.create_connection(self.local_connection_url)
 
         try:
-            with Connection(create_engine(self.upstream_connection_url)) as upstream_connection:
+            with self.create_connection(self.upstream_connection_url) as upstream_connection:
                 if self._verbose:
                     print("Copying database...", file=sys.stderr)
 
@@ -165,7 +201,7 @@ class DBDataset(Dataset):
 
     def process(self):
         if self.connection is None:
-            self.connection = Connection(create_engine(self.connection_url))
+            self.connection = self.create_connection(self.connection_url)
 
         # TODO: Save the schema in the processed_file_names (instead of always re-running the analysis)
         # TODO: Reconsider guessing the schema here - we have to share it somehow with the model itself
@@ -197,7 +233,7 @@ class DBDataset(Dataset):
 
     def get_as_dict(self, idx: int) -> Tuple[Dict[str, Set[Tuple[Any, ...]]], Any]:
         if self.connection is None:
-            self.connection = Connection(create_engine(self.connection_url))
+            self.connection = self.create_connection(self.connection_url)
 
         assert self.schema is not None
         return self.strategy.get_db_data(idx, self.connection, self.target_table, self.schema)

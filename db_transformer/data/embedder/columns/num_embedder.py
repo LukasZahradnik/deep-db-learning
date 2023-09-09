@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 import torch
 
 from db_transformer.schema.columns import NumericColumnDef
@@ -18,11 +18,12 @@ class NumEmbedder(ColumnEmbedder[NumericColumnDef]):
 
         self.linear: torch.nn.Linear
 
-    def create(self, column_def: Any):
-        self.linear = torch.nn.Linear(1, self.dim)
+    def create(self, column_def: Any, device: Optional[str] = None):
+        self.linear = torch.nn.Linear(1, self.dim, device=device)
 
     def forward(self, value) -> torch.Tensor:
         if len(value.shape) == 1:
             value = value.unsqueeze(dim=1)
 
         return self.linear(value)
+

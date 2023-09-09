@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from typing import Generic, Optional, TypeVar
 import torch
 
 from db_transformer.schema.columns import ColumnDef
@@ -13,7 +13,7 @@ __all__ = [
 
 class ColumnEmbedder(torch.nn.Module, Generic[_TColumnDef], ABC):
     @abstractmethod
-    def create(self, column_def: _TColumnDef):
+    def create(self, column_def: _TColumnDef, device: Optional[str] = None):
         pass
 
     @abstractmethod
