@@ -43,6 +43,7 @@ class HeteroDataBuilder:
                  target_column: str,
                  df_converter: Optional[DataFrameConverter] = None,
                  target_one_hot: bool = False,
+                 device=None,
                  ):
         if isinstance(inspector_or_connection, Connection):
             db_inspector = DBInspector(inspector_or_connection)
@@ -60,6 +61,7 @@ class HeteroDataBuilder:
 
         self.df_converter = df_converter
         self.target_one_hot = target_one_hot
+        self.device = device
 
     @staticmethod
     def extend_default_df_converter(*converters: Tuple[Optional[Type[ColumnDef]], SeriesConverter],
@@ -111,7 +113,7 @@ class HeteroDataBuilder:
                        how='inner',
                        left_on=fk_def.columns, right_on=fk_def.ref_columns)
 
-        return torch.from_numpy(out[['__pandas_index_x', '__pandas_index_y']].to_numpy()).t().contiguous()
+        return torch.from_numpy(out[['__pandas_index_x', '__pandas_index_y']].to_numpy()).t().contiguous().to(self.device)
 
     def build(self) -> HeteroData:
         out = HeteroData()
@@ -139,24 +141,27 @@ class HeteroDataBuilder:
 
                 # set target
                 if self.target_one_hot:
-                    out[target_table_name].y = F.one_hot(torch.from_numpy(df[self.target_column].to_numpy(dtype=int)))
+                    out[target_table_name].y = F.one_hot(torch.from_numpy(df[self.target_column].to_numpy(dtype=int))).to(device=self.device)
                 else:
-                    out[target_table_name].y = torch.from_numpy(df[self.target_column].to_numpy())
-                del df[self.target_column]
+                    out[target_table_name].y = torch.from_numpy(df[self.target_column].to_numpy()).to(self.device)
+                df[self.target_column] = 0.0  # Might be better to change back to del
 
             for tn in table_names:
                 if len(df.columns) == 0:
-                    out[tn].x = torch.ones((len(df), 1))
+                    out[tn].x = torch.ones((len(df), 1), device=self.device)
                 else:
-                    out[tn].x = torch.from_numpy(df.to_numpy(dtype=float))
+                    out[tn].x = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(self.device)
 
-        # add reverse edges
-        out = T.ToUndirected()(out)
 
         # duplicate edges for target table and non-target table of the same name
         for (x, name, y), d in out.edge_items():
             if x == self.target_table:
-                id = target_table_name, name, y
-                out[id].edge_index = torch.clone(d['edge_index'])
+                idx = target_table_name, name, y
+                out[idx].edge_index = torch.clone(d['edge_index']).to(self.device)
+            elif y == self.target_table:
+                idx = x, name, target_table_name
+                out[idx].edge_index = torch.clone(d['edge_index']).to(self.device)
 
+        # add reverse edges
+        out = T.ToUndirected()(out)
         return out
