@@ -13,7 +13,9 @@ class TransformerGNN(MessagePassing):
         self.in_channels = in_channels
 
         self.lin = Linear(in_channels, in_channels, bias=True)
-        self.transformer = torch.nn.TransformerEncoderLayer(self.in_channels, num_heads, dim_feedforward=ff_dim, batch_first=True)
+
+        self.transformer = torch.nn.MultiheadAttention(self.in_channels, num_heads, batch_first=True)
+        # self.transformer = torch.nn.TransformerEncoderLayer(self.in_channels, num_heads, dim_feedforward=ff_dim, batch_first=True)
 
         self.b_proj = torch.nn.Linear(in_channels, in_channels)
 
@@ -30,8 +32,8 @@ class TransformerGNN(MessagePassing):
         x_j = self.b_proj(x_j)
         x_c = torch.concat((x_i, x_j), dim=1)
 
-        x = self.transformer(x_c)
-        x = x[:, :x_i.shape[1], :]
+        x, _ = self.transformer(x_i, x_c, x_c)
+        # x = x[:, :x_i.shape[1], :]
 
         return x
 
