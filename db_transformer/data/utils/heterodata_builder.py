@@ -125,7 +125,8 @@ class HeteroDataBuilder:
                 id = table_name, '-'.join(fk_def.columns), fk_def.ref_table
                 out[id].edge_index = self.fk_to_index(fk_def, table_dfs[table_name], table_dfs[fk_def.ref_table])
 
-        target_table_name = '__target_' + self.target_table
+        # target_table_name = '__target_' + self.target_table
+        target_table_name = '_target_table'
 
         # convert all tables
         for table_name, df in table_dfs.items():
