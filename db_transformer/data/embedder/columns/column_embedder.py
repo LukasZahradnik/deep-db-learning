@@ -12,10 +12,9 @@ __all__ = [
 
 
 class ColumnEmbedder(torch.nn.Module, Generic[_TColumnDef], ABC):
-    @abstractmethod
-    def create(self, column_def: _TColumnDef, device: Optional[str] = None):
+    def create(self, column_def: _TColumnDef):
         pass
 
     @abstractmethod
-    def forward(self, value) -> torch.Tensor:
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
         pass

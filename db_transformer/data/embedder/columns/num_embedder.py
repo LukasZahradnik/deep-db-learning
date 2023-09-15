@@ -1,29 +1,34 @@
-from typing import Any, Optional
 import torch
 
-from db_transformer.schema.columns import NumericColumnDef
-
 from .column_embedder import ColumnEmbedder
-
 
 __all__ = [
     'NumEmbedder',
 ]
 
 
-class NumEmbedder(ColumnEmbedder[NumericColumnDef]):
+class NumEmbedder(ColumnEmbedder):
+    """Passes features (or a feature) through a linear layer.
+
+    Input tensor: [..., num_features] -> output: [..., num_features, dim]
+    """
+
     def __init__(self, dim: int) -> None:
         super().__init__()
+
         self.dim = dim
+        self.embedding = torch.nn.Linear(1, self.dim)
 
-        self.linear: torch.nn.Linear
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        squeezed = False
 
-    def create(self, column_def: Any, device: Optional[str] = None):
-        self.linear = torch.nn.Linear(1, self.dim, device=device)
+        if value.shape[-1] != 1:
+            squeezed = True
+            value = value.unsqueeze(dim=-1)
 
-    def forward(self, value) -> torch.Tensor:
-        if len(value.shape) == 1:
-            value = value.unsqueeze(dim=1)
+        out = self.embedding(value)
 
-        return self.linear(value)
+        if not squeezed:
+            out = out.unsqueeze(-2)
 
+        return out
