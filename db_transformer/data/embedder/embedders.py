@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch_geometric.data.data import NodeType
@@ -10,9 +10,6 @@ from .columns.column_embedder import ColumnEmbedder
 from .columns.identity_embedder import IdentityEmbedder
 
 __ALL__ = ['SingleTableEmbedder', 'TableEmbedder']
-
-
-_T = TypeVar('_T')
 
 
 class SingleTableEmbedder(torch.nn.Module):
@@ -44,11 +41,6 @@ class SingleTableEmbedder(torch.nn.Module):
 
         return vals
 
-    def _get_column_name(self, index: int, default: _T = None) -> Union[str, _T]:
-        if self.column_names is not None:
-            return self.column_names[index]
-        return default
-
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         assert input.shape[-1] == len(self.embedders)
         vals = []
@@ -58,8 +50,12 @@ class SingleTableEmbedder(torch.nn.Module):
             try:
                 val = self.embedders[i](val)
             except Exception as e:
-                raise RuntimeError(f"Failed to embed feature {i} of type {self.column_defs[i]} "
-                    f"(name: {self._get_column_name(i, 'unknown')})") from e
+                if self.column_names is not None:
+                    colname = '\'' + self.column_names[i] + '\' '
+                else:
+                    colname = ''
+
+                raise RuntimeError(f"Failed to embed feature {colname}at index {i}: {self.column_defs[i]}") from e
             vals.append(val)
 
         vals = self._fix_dimensionality(vals)
@@ -71,12 +67,13 @@ class SingleTableEmbedder(torch.nn.Module):
 class TableEmbedder(torch.nn.Module):
     def __init__(self,
                  *column_embedders: Tuple[ColumnDefMatcherLike, Callable[[], ColumnEmbedder]],
-                 column_defs_per_table: Dict[str, List[ColumnDef]]) -> None:
+                 column_defs: Dict[str, List[ColumnDef]],
+                 column_names: Dict[str, List[str]]) -> None:
         super().__init__()
 
         self.table_embedders = torch.nn.ModuleDict({
-            table: SingleTableEmbedder(*column_embedders, column_defs=column_defs)
-            for table, column_defs in column_defs_per_table.items()
+            t: SingleTableEmbedder(*column_embedders, column_defs=column_defs_this, column_names=column_names[t])
+            for t, column_defs_this in column_defs.items()
         })
 
     def forward(self, node_data: Dict[NodeType, torch.Tensor]) -> Dict[NodeType, torch.Tensor]:

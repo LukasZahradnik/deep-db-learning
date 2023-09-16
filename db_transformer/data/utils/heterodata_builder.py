@@ -181,8 +181,25 @@ class HeteroDataBuilder:
             self._convert_dataframes(table_dfs)
             return table_dfs
 
-    def build(self) -> Tuple[HeteroData, Dict[str, List[ColumnDef]]]:
+    @overload
+    def build(self, with_column_names: Literal[True]) -> Tuple[HeteroData,
+                                                         Dict[str, List[ColumnDef]],
+                                                         Dict[str, List[str]]]:
+        ...
+
+    @ overload
+    def build(self, with_column_names: Literal[False] = False) -> Tuple[HeteroData,
+                                                                  Dict[str, List[ColumnDef]]]:
+        ...
+
+    def build(self, with_column_names: bool = False) -> Union[Tuple[HeteroData,
+                                                              Dict[str, List[ColumnDef]]],
+                                                        Tuple[HeteroData,
+                                                              Dict[str, List[ColumnDef]],
+                                                              Dict[str, List[str]]]]:
         out = HeteroData()
+
+        out_labels = {}
 
         # get all tables
         table_dfs = self._get_dataframes_raw()
@@ -203,10 +220,16 @@ class HeteroDataBuilder:
         # set HeteroData features (with target now removed)
         for table_name, df in table_dfs.items():
             out[table_name].x = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(self.device)
-            out_column_defs[table_name] = [column_defs[table_name][str(col)] for col in df.columns]
+            this_labels = [str(col) for col in df.columns]
+            out_column_defs[table_name] = [column_defs[table_name][column_name] for column_name in this_labels]
+            if with_column_names:
+                out_labels[table_name] = this_labels
 
         if self.create_reverse_edges:
             # add reverse edges
             out: HeteroData = T.ToUndirected()(out)
+
+        if with_column_names:
+            return out, out_column_defs, out_labels
 
         return out, out_column_defs

@@ -68,7 +68,11 @@ class PerTypeDataFrameConverter(DataFrameConverter):
                 continue
 
             if converter is not None:
-                series, this_column_defs = converter(column_def, df[column_name])
+                try:
+                    series, this_column_defs = converter(column_def, df[column_name])
+                except Exception as e:
+                    raise RuntimeError(f"Failed to convert {table_name}.{column_name} using {converter}") from e
+
                 if len(series) != len(this_column_defs):
                     raise ValueError(f"{converter} returned {len(series)} pd.Series objects, "
                                      f"but {len(this_column_defs)} column definition objects "
