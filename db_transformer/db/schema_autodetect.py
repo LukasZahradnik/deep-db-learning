@@ -188,7 +188,10 @@ will receive the :py:class:`OmitColumnDef` type
             tbl = table(table_name)
             col = column(column_name)
 
-            query = select(fn.count(distinct(col))).select_from(tbl)
+            # subquery instead of COUNT(DISTINCT [col]) in order to include null values in the count
+            query = select(fn.count()).select_from(
+                select(distinct(col)).select_from(tbl).subquery()
+            )
             return self.connection.scalar(query)
         except OperationalError as e:
             if self._verbose:
