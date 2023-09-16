@@ -1,14 +1,16 @@
 import re
+import warnings
 from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 
 import inflect
 import sqlalchemy.sql.functions as fn
+from sqlalchemy import column, table
 from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMTEXT
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import distinct, select
-from sqlalchemy.sql.expression import null
+from sqlalchemy.sql.expression import func, null
 from sqlalchemy.sql.operators import isnot
 from sqlalchemy.types import (
     TEXT,
@@ -175,7 +177,7 @@ will receive the :py:class:`OmitColumnDef` type
         return out
 
     @lru_cache(maxsize=None)
-    def guess_categorical_cardinality(self, table: str, column: str) -> Optional[int]:
+    def guess_categorical_cardinality(self, table_name: str, column_name: str) -> Optional[int]:
         """Query the DB for the total number of distinct values present in a column.
 
         Equivalent to something like `SELECT count(*) FROM (SELECT DISTINCT [column] FROM [table])`.
@@ -183,15 +185,18 @@ will receive the :py:class:`OmitColumnDef` type
         Caches its outputs using `@lru_cache`.
         """
         try:
-            tbl = self.db_inspector.get_orm_table(table)
-            col = getattr(tbl.c, column)
+            tbl = table(table_name)
+            col = column(column_name)
+
             query = select(fn.count(distinct(col))).select_from(tbl)
             return self.connection.scalar(query)
-        except OperationalError:
+        except OperationalError as e:
+            if self._verbose:
+                warnings.warn(str(e))
             return None
 
     @lru_cache(maxsize=None)
-    def query_no_nonnull(self, table: str, column: str) -> Optional[int]:
+    def query_no_nonnull(self, table_name: str, column_name: str) -> Optional[int]:
         """Query the DB for the total number of non-null values present in a column.
 
         Equivalent to `SELECT count([column]) FROM [table] WHERE [column] IS NOT NULL`
@@ -199,11 +204,13 @@ will receive the :py:class:`OmitColumnDef` type
         Caches its outputs using `@lru_cache`
         """
         try:
-            tbl = self.db_inspector.get_orm_table(table)
-            col = getattr(tbl.c, column)
+            tbl = table(table_name)
+            col = column(column_name)
             query = select(fn.count(col)).select_from(tbl).where(isnot(col, null()))
             return self.connection.scalar(query)
-        except OperationalError:
+        except OperationalError as e:
+            if self._verbose:
+                warnings.warn(str(e))
             return None
 
     def do_guess_column_type(self, table: str, column: str,
@@ -276,8 +283,10 @@ will receive the :py:class:`OmitColumnDef` type
         """
         if cls == CategoricalColumnDef:
             cardinality = self.guess_categorical_cardinality(table, column)
-            assert cardinality is not None, f"Column {table}.{column} was determined to be categorical but cardinality cannot be retrieved."
-            return CategoricalColumnDef(key=in_primary_key, card=cardinality)
+            assert cardinality is not None, (f"Column {table}.{column} was determined to be categorical "
+                                             "but cardinality cannot be retrieved.")
+            return CategoricalColumnDef(key=in_primary_key,
+                                        card=cardinality)
 
         if cls in {NumericColumnDef, DateColumnDef, DateTimeColumnDef,
                    DurationColumnDef, TimeColumnDef, OmitColumnDef, TextColumnDef}:
@@ -334,13 +343,13 @@ will receive the :py:class:`OmitColumnDef` type
         """
         schema = Schema()
 
-        for table in wrap_progress(self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"):
+        for table_name in wrap_progress(self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"):
             column_defs = ColumnDefs()
-            fks: List[ForeignKeyDef] = list(self.db_inspector.get_foreign_keys(table).values())
-            for column in self.db_inspector.get_columns(table):
-                column_defs[column] = self.guess_column_type(table, column)
+            fks: List[ForeignKeyDef] = list(self.db_inspector.get_foreign_keys(table_name).values())
+            for column_name in self.db_inspector.get_columns(table_name):
+                column_defs[column_name] = self.guess_column_type(table_name, column_name)
 
-            schema[table] = TableSchema(columns=column_defs, foreign_keys=fks)
+            schema[table_name] = TableSchema(columns=column_defs, foreign_keys=fks)
 
         return schema
 

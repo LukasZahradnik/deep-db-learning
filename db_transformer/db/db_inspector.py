@@ -33,13 +33,6 @@ class DBInspectorInterface(ABC):
         ...
 
     @abstractmethod
-    def get_orm_table(self, table: str) -> sqlalchemy.Table:
-        """
-        Returns a `sqlalchemy.Table` instance, allowing for running queries on the database table.
-        """
-        ...
-
-    @abstractmethod
     def get_tables(self) -> Set[str]:
         """
         Get all tables in the databases as a set.
@@ -122,32 +115,6 @@ All values that remain are the tables that the inspector will be aware of; exclu
     def engine(self) -> Engine:
         return self._connection.engine
 
-    def get_orm_table(self, table: str) -> sqlalchemy.Table:
-        pk = self.get_primary_key(table)
-        pk_empty = len(pk) == 0
-
-        # Note: SQLAlchemy's automap can be used here instead of creating a simple table model like below, but that is
-        # unnecessarily complicated for our purposes here - we do not need foreign keys mapped, for example.
-        # Also, automap doesn't support tables without primary keys, which is a dealbreaker why we cannot use it.
-        # We need very simple SQL queries here anyway.
-
-        # Note: SQLAlchemy needs all tables to have a priamry key because it differentiates rows based on primary key values.
-        # If a table doesn't have a primary key, SQLAlchemy doesn't default to anything and simply refuses to work with such table.
-        # As a workaround, if primary key is empty, then we "trick" SQLAlchemy as follows: we mark all columns as primary key.
-        # That way SQLAlchemy will differentiate rows based on the values in all columns.
-        #
-        # We do not propagate this "trick" to the machine learning pipeline - it is only for SQLAlchemy to work.
-        columns = [
-            sqlalchemy.Column(col['name'], col['type'], primary_key=pk_empty or col['name'] in pk)
-            for col in self._inspect.get_columns(table)
-        ]
-
-        tbl = Table(table,
-                    sqlalchemy.MetaData(schema=self._inspect.default_schema_name),
-                    *columns
-                    )
-        return tbl
-
     def get_tables(self) -> Set[str]:
         out = set(self._inspect.get_table_names())
 
@@ -210,10 +177,6 @@ class CachedDBInspector(DBInspectorInterface):
     @property
     def engine(self) -> Engine:
         return self._delegate.engine
-
-    @lru_cache(maxsize=None)
-    def get_orm_table(self, table: str) -> sqlalchemy.Table:
-        return self._delegate.get_orm_table(table)
 
     @lru_cache(maxsize=None)
     def get_tables(self) -> Set[str]:
