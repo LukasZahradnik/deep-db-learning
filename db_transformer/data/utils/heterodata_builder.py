@@ -94,7 +94,7 @@ class HeteroDataBuilder:
             (NumericColumnDef, IdentityConverter()),
             (DateColumnDef, TimestampConverter()),
             (DateTimeColumnDef, TimestampConverter()),
-            (TimeColumnDef, TimestampConverter()),
+            (TimeColumnDef, TimeConverter()),
             (None, OmitConverter()),
         ))
 

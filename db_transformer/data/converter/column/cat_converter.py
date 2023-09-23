@@ -1,6 +1,7 @@
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 import pandas as pd
+import unidecode
 
 from db_transformer.data.converter.column.series_converter import SeriesConverter
 from db_transformer.schema.columns import CategoricalColumnDef
@@ -30,7 +31,9 @@ class CategoricalConverter(SeriesConverter[CategoricalColumnDef]):
                                                                              Callable[[pd.Series], pd.Series]]:
         MAPPINGS: List[Callable[[pd.Series], pd.Series]] = [
             lambda s: s,  # as-is
-            lambda s: s.str.lower()  # case insensitive
+            lambda s: s.str.lower(),  # case insensitive
+            lambda s: s.map(lambda s: unidecode.unidecode(s)),  # stripped accents
+            lambda s: s.map(lambda s: unidecode.unidecode(s).lower()),  # stripped accents and CI
         ]
 
         choices: Dict[int, Tuple[List[Any], Callable[[pd.Series], pd.Series]]] = {}

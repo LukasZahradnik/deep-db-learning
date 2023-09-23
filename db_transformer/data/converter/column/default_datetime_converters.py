@@ -1,3 +1,4 @@
+import datetime
 import pandas as pd
 
 from db_transformer.schema.columns import NumericColumnDef
@@ -21,6 +22,10 @@ def _get_seconds_since_midnight(s: pd.Series) -> pd.Series:
     return ((s - s.dt.normalize()) / pd.Timedelta('1 second')).astype(int)
 
 
+def _get_seconds_since_midnight_time(t: datetime.time) -> int:
+    return t.second + (t.minute + t.hour * 60) * 60
+
+
 class DateTimeConverter(PandasConverter):
     """Converts column to year, day of year, and seconds since midnight."""
 
@@ -37,7 +42,7 @@ class TimeConverter(PandasConverter):
 
     def __init__(self, skip_if_allsame=True) -> None:
         super().__init__(
-            ('', lambda s: (_get_seconds_since_midnight(s), NumericColumnDef())),
+            ('', lambda s: (s.map(lambda v: _get_seconds_since_midnight_time(v)), NumericColumnDef())),
             skip_if_allsame=skip_if_allsame
         )
 
