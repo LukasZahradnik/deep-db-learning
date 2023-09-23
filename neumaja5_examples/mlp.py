@@ -388,6 +388,9 @@ if __name__ == "__main__":
 
         file_name = os.path.basename(__file__)
         with mlflow.start_run(run_name=f"{file_name} - {dataset} - {uuid.uuid4()}") as run:
+            mlflow.set_tag('dataset', dataset)
+            mlflow.set_tag('Model Source', file_name)
+
             try:
                 _run_main()
             except Exception as ex:
