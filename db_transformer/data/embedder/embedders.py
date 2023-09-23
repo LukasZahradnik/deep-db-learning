@@ -15,12 +15,14 @@ __ALL__ = ['SingleTableEmbedder', 'TableEmbedder']
 class SingleTableEmbedder(torch.nn.Module):
     def __init__(self,
                  *column_embedders: Tuple[ColumnDefMatcherLike, Callable[[], ColumnEmbedder]],
+                 dim: int,
                  column_defs: Sequence[ColumnDef],
                  column_names: Optional[List[str]] = None) -> None:
         super().__init__()
 
         self.column_defs = column_defs
         self.column_names = column_names
+        self.dim = dim
 
         column_embedders = tuple((get_matcher(k), v) for k, v in column_embedders)
 
@@ -43,6 +45,10 @@ class SingleTableEmbedder(torch.nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         assert input.shape[-1] == len(self.embedders)
+
+        if input.shape[-1] == 0:
+            return input.unsqueeze(-1).repeat([*([1] * input.dim()), self.dim])
+
         vals = []
 
         for i in range(len(self.embedders)):
@@ -67,12 +73,13 @@ class SingleTableEmbedder(torch.nn.Module):
 class TableEmbedder(torch.nn.Module):
     def __init__(self,
                  *column_embedders: Tuple[ColumnDefMatcherLike, Callable[[], ColumnEmbedder]],
+                 dim: int,
                  column_defs: Dict[str, List[ColumnDef]],
                  column_names: Dict[str, List[str]]) -> None:
         super().__init__()
 
         self.table_embedders = torch.nn.ModuleDict({
-            t: SingleTableEmbedder(*column_embedders, column_defs=column_defs_this, column_names=column_names[t])
+            t: SingleTableEmbedder(*column_embedders, dim=dim, column_defs=column_defs_this, column_names=column_names[t])
             for t, column_defs_this in column_defs.items()
         })
 

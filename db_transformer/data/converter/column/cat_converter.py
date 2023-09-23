@@ -2,14 +2,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from db_transformer.data.converter.column.series_converter import BaseSeriesConverter
+from db_transformer.data.converter.column.series_converter import SeriesConverter
 from db_transformer.schema.columns import CategoricalColumnDef
 from db_transformer.schema.schema import ColumnDef
 
 __ALL__ = ['CategoricalConverter']
 
 
-class CategoricalConverter(BaseSeriesConverter[CategoricalColumnDef]):
+class CategoricalConverter(SeriesConverter[CategoricalColumnDef]):
     def __call__(self,
                  column_def: CategoricalColumnDef,
                  column: pd.Series) -> Tuple[Sequence[pd.Series], Sequence[ColumnDef]]:

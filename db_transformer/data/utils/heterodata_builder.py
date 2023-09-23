@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch_geometric.transforms as T
-from sqlalchemy import Connection
+from sqlalchemy.engine import Connection
 from torch_geometric.data import HeteroData
 
 from db_transformer.data.converter import (
@@ -17,11 +17,12 @@ from db_transformer.data.converter import (
     DateTimeConverter,
     IdentityConverter,
     OmitConverter,
-    PerTypeDataFrameConverter,
     TimeConverter,
     TimestampConverter,
 )
+from db_transformer.data.converter.column.per_type_converter import PerTypeSeriesConverter
 from db_transformer.data.converter.column.series_converter import SeriesConverter
+from db_transformer.data.converter.dataframe_converter import SimpleDataFrameConverter
 from db_transformer.db.db_inspector import DBInspector, DBInspectorInterface
 from db_transformer.schema.columns import (
     CategoricalColumnDef,
@@ -44,6 +45,7 @@ class HeteroDataBuilder:
                  df_converter: Optional[DataFrameConverter] = None,
                  create_reverse_edges: bool = True,
                  separate_target: bool = True,
+                 fillna_with: Optional[float] = None,
                  device=None,
                  ):
         if isinstance(inspector_or_connection, Connection):
@@ -58,31 +60,52 @@ class HeteroDataBuilder:
         self.target_column = target_column
 
         if df_converter is None:
-            df_converter = self.extend_default_df_converter(schema=schema)
+            df_converter = self.extend_default_df_converter(
+                schema=schema,
+                target=(self.target_table, self.target_column)
+            )
 
         self.df_converter = df_converter
         self.create_reverse_edges = create_reverse_edges
         self.separate_target = separate_target
         self.device = device
+        self.fillna_with = fillna_with
 
     @staticmethod
     def extend_default_df_converter(*converters: Tuple[Optional[Type[ColumnDef]], SeriesConverter],
-                                    schema: Schema) -> DataFrameConverter:
-        col_converters: OrderedDict[Optional[Type[ColumnDef]], SeriesConverter] = OrderedDict((
+                                    schema: Schema,
+                                    target: Tuple[str, str],
+                                    target_converters: Optional[List[Tuple[Optional[Type[ColumnDef]],
+                                                                           SeriesConverter]]] = None
+                                    ) -> DataFrameConverter:
+        the_converters: OrderedDict[Optional[Type[ColumnDef]], SeriesConverter] = OrderedDict((
             (CategoricalColumnDef, CategoricalConverter()),
             (NumericColumnDef, IdentityConverter()),
-            (DateColumnDef, ConverterList(DateConverter(), TimestampConverter())),
-            (DateTimeColumnDef, ConverterList(DateTimeConverter(), TimestampConverter())),
-            (TimeColumnDef, ConverterList(TimeConverter(), TimestampConverter())),
+            (DateColumnDef, DateConverter()),
+            (DateTimeColumnDef, DateTimeConverter()),
+            (TimeColumnDef, TimeConverter()),
             (None, OmitConverter()),
         ))
 
-        col_converters.update(converters)
+        the_converters.update(converters)
 
-        return PerTypeDataFrameConverter(
-            *col_converters.items(),
-            schema=schema
-        )
+        the_target_converters: OrderedDict[Optional[Type[ColumnDef]], SeriesConverter] = OrderedDict((
+            (CategoricalColumnDef, CategoricalConverter()),
+            (NumericColumnDef, IdentityConverter()),
+            (DateColumnDef, TimestampConverter()),
+            (DateTimeColumnDef, TimestampConverter()),
+            (TimeColumnDef, TimestampConverter()),
+            (None, OmitConverter()),
+        ))
+
+        if target_converters is not None:
+            the_target_converters.update(target_converters)
+
+        return SimpleDataFrameConverter(
+            series_converter=PerTypeSeriesConverter(*the_converters.items()),
+            target_converter=PerTypeSeriesConverter(*the_target_converters.items()),
+            schema=schema,
+            target=target)
 
     def _table_to_dataframe_raw(self, table_name: str) -> pd.DataFrame:
         if table_name not in self.schema.keys():
@@ -130,20 +153,23 @@ class HeteroDataBuilder:
 
     def _convert_dataframe(self, name: str, df: pd.DataFrame) -> Dict[str, ColumnDef]:
         column_defs = self.df_converter.convert_table(name, df, inplace=True)
+        if self.fillna_with is not None:
+            df.fillna(self.fillna_with, inplace=True)
         return column_defs
 
     def _convert_dataframes(self, table_dfs: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, ColumnDef]]:
         out_column_defs = {}
 
         for table_name, df in table_dfs.items():
-            types_this = self.df_converter.convert_table(table_name, df, inplace=True)
+            types_this = self._convert_dataframe(table_name, df)
             out_column_defs[table_name] = types_this
 
         return out_column_defs
 
     def _convert_dataframes_and_target(self,
-                                       table_dfs: Dict[str, pd.DataFrame]) -> Tuple[Tuple[pd.DataFrame, Dict[str, ColumnDef]],
-                                                                                    Dict[str, Dict[str, ColumnDef]]]:
+                                       table_dfs: Dict[str, pd.DataFrame]) -> Tuple[
+            Tuple[pd.DataFrame, Dict[str, ColumnDef]],
+            Dict[str, Dict[str, ColumnDef]]]:
         # separate target from features
         target_df = self._pop_target_column(table_dfs).to_frame(self.target_column)
 
@@ -183,18 +209,18 @@ class HeteroDataBuilder:
 
     @overload
     def build(self, with_column_names: Literal[True]) -> Tuple[HeteroData,
-                                                         Dict[str, List[ColumnDef]],
-                                                         Dict[str, List[str]]]:
+                                                               Dict[str, List[ColumnDef]],
+                                                               Dict[str, List[str]]]:
         ...
 
     @ overload
     def build(self, with_column_names: Literal[False] = False) -> Tuple[HeteroData,
-                                                                  Dict[str, List[ColumnDef]]]:
+                                                                        Dict[str, List[ColumnDef]]]:
         ...
 
     def build(self, with_column_names: bool = False) -> Union[Tuple[HeteroData,
                                                               Dict[str, List[ColumnDef]]],
-                                                        Tuple[HeteroData,
+                                                              Tuple[HeteroData,
                                                               Dict[str, List[ColumnDef]],
                                                               Dict[str, List[str]]]]:
         out = HeteroData()
@@ -213,7 +239,11 @@ class HeteroDataBuilder:
         (target_df, _), column_defs = self._convert_dataframes_and_target(table_dfs)
 
         # set HeteroData target
-        out[self.target_table].y = torch.from_numpy(target_df.to_numpy(dtype=np.float32)).to(self.device)
+        y = torch.from_numpy(target_df.to_numpy()).to(self.device)
+        if y.shape[-1] != 1:
+            raise ValueError("Target (y) shouldn't have more than 1 feature")
+
+        out[self.target_table].y = y.squeeze(-1)
 
         out_column_defs: Dict[str, List[ColumnDef]] = {}
 

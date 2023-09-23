@@ -9,17 +9,10 @@ _TColumnDef = TypeVar('_TColumnDef', bound=ColumnDef)
 
 __ALL__ = [
     'SeriesConverter',
-    'BaseSeriesConverter',
 ]
 
 
-class SeriesConverter(Protocol):
-    @abstractmethod
-    def __call__(self, column_def: ColumnDef, column: pd.Series) -> Tuple[Sequence[pd.Series], Sequence[ColumnDef]]:
-        ...
-
-
-class BaseSeriesConverter(Generic[_TColumnDef], ABC):
+class SeriesConverter(Generic[_TColumnDef], ABC):
     @abstractmethod
     def __call__(self, column_def: _TColumnDef, column: pd.Series) -> Tuple[Sequence[pd.Series], Sequence[ColumnDef]]:
         pass
