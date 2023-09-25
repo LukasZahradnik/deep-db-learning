@@ -1,7 +1,7 @@
 import re
 import warnings
 from functools import lru_cache
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
+from typing import Dict, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
 
 import inflect
 import sqlalchemy.sql.functions as fn
@@ -55,6 +55,9 @@ __all__ = [
 ]
 
 
+TargetType = Literal['categorical', 'numeric']
+
+
 class SchemaAnalyzer:
     """Auto-detect a database :py:class:`Schema`.
 
@@ -67,7 +70,7 @@ class SchemaAnalyzer:
     """
 
     DETERMINED_TYPES: Dict[Type[ColumnDef], Tuple[Type[TypeEngine], ...]] = {
-        TextColumnDef: (Text, TEXT, LONGTEXT, MEDIUMTEXT, Unicode, ),
+        TextColumnDef: (LONGTEXT, MEDIUMTEXT, Unicode, ),
         CategoricalColumnDef: (Boolean, ),
         NumericColumnDef: (Numeric, ),
         DateColumnDef: (Date, ),
@@ -84,6 +87,13 @@ class SchemaAnalyzer:
 
     COMMON_NUMERIC_COLUMN_NAME_REGEX = re.compile(
         r"balance|amount|size|duration|frequency|count|cnt|votes|score|number|age|year|month|day", re.IGNORECASE)  # TODO: add more?
+
+    FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_GUARANTEED_THRESHOLD = 0.05
+    """
+    The fraction of distinct values to total count of non-null values,
+    which decides (in some situations) that type must be categorical.
+    If the fraction is below this threshold, marks the column as categorical.
+    """
 
     FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.95
     """
@@ -107,6 +117,7 @@ class SchemaAnalyzer:
                  omit_filters: Union[SetFilterProtocol[Tuple[str, str]],
                                      Iterable[Tuple[str, str]], Tuple[str, str], None] = None,
                  target: Optional[Tuple[str, str]] = None,
+                 target_type: Optional[TargetType] = None,
                  verbose=False,
                  ) -> None:
         """Construct the SchemaAnalyzer.
@@ -139,6 +150,7 @@ will receive the :py:class:`OmitColumnDef` type
         self._inspector = inspector
 
         self._target = target
+        self._target_type: Optional[TargetType] = target_type
 
         if isinstance(omit_filters, tuple):
             omit_filters = [omit_filters]
@@ -240,7 +252,7 @@ will receive the :py:class:`OmitColumnDef` type
                                  "but it cannot be omitted as it is the target.")
             return OmitColumnDef
 
-        if isinstance(col_type, (Integer, String)):
+        if isinstance(col_type, (Integer, String, Text, TEXT)):
             cardinality = self.guess_categorical_cardinality(table, column)
 
             # first check if it is an ID-like column name
@@ -264,9 +276,13 @@ will receive the :py:class:`OmitColumnDef` type
                     return NumericColumnDef
 
                 return CategoricalColumnDef
-            elif isinstance(col_type, String):
+            else:
                 if cardinality is None or cardinality > self.STRING_CARDINALITY_THRESHOLD:
                     return TextColumnDef
+
+                if (n_nonnull is not None and
+                        cardinality / n_nonnull < self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_GUARANTEED_THRESHOLD):
+                    return CategoricalColumnDef
 
                 if (n_nonnull is not None and
                         cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
@@ -312,9 +328,17 @@ will receive the :py:class:`OmitColumnDef` type
         col_type = self.db_inspector.get_columns(table)[column]
         pk = self.db_inspector.get_primary_key(table)
         is_in_pk = column in pk
-        must_have_type = (table, column) == self._target
+        is_target = (table, column) == self._target
 
-        if not must_have_type:
+        guessed_type: Optional[Type[ColumnDef]] = None
+        if is_target and self._target_type is not None:
+            if self._target_type == 'categorical':
+                guessed_type = CategoricalColumnDef
+            elif self._target_type == 'numeric':
+                guessed_type = NumericColumnDef
+            else:
+                raise ValueError()
+        else:
             if is_in_pk and len(pk) == 1:
                 # This is the only primary key column.
                 # The column is thus most likely purely an identifier of the row, without holding any extra information,
@@ -331,10 +355,11 @@ will receive the :py:class:`OmitColumnDef` type
                 return OmitColumnDef(key=is_in_pk)
 
         # delegate to other methods
-        guessed_type = self.do_guess_column_type(
-            table, column, in_primary_key=is_in_pk, must_have_type=must_have_type, col_type=col_type)
+        if guessed_type is None:
+            guessed_type = self.do_guess_column_type(
+                table, column, in_primary_key=is_in_pk, must_have_type=is_target, col_type=col_type)
 
-        if must_have_type and isinstance(guessed_type, OmitColumnDef):
+        if is_target and isinstance(guessed_type, OmitColumnDef):
             raise TypeError(f"Column '{column}' in table '{table}' cannot be omitted.")
 
         return self.instantiate_column_type(table, column, in_primary_key=is_in_pk, cls=guessed_type)
