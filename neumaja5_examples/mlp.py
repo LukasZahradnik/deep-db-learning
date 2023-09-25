@@ -2,7 +2,7 @@ import argparse
 import os
 import random
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Callable, Dict, List, Literal, Optional, Tuple, TypeVar, Union
 from typing import get_args as t_get_args
 
@@ -34,8 +34,6 @@ random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
 
-DEFAULT_DATASET_NAME = 'voc'
-
 
 @dataclass
 class DataConfig:
@@ -53,6 +51,9 @@ DatasetType = Literal[
     'Shakespeare', 'Student_loan', 'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'trains', 'university', 'UTube',
     'UW_std', 'VisualGenome', 'voc', 'WebKP', 'world'
 ]
+
+
+DEFAULT_DATASET_NAME: DatasetType = 'voc'
 
 
 @dataclass
@@ -139,6 +140,7 @@ class TheLightningModel(L.LightningModule):
         self._best_train_loss = float('inf')
         self._best_train_acc = 0.0
         self._best_val_acc = 0.0
+        self._best_test_acc = 0.0
 
     def forward(self, data: HeteroData, mode: Literal['train', 'test', 'val']):
         target_tbl = data[self.defaults.target_table]
@@ -216,6 +218,17 @@ class SimpleDataset(Dataset[_T]):
         return self._data[index]
 
 
+def get_schema_analyzer(conn: Connection, defaults: FITDatasetDefaults) -> SchemaAnalyzer:
+    target_type = 'categorical' if defaults.task == TaskType.CLASSIFICATION else 'numeric'
+
+    return SchemaAnalyzer(
+        conn,
+        target=(defaults.target_table, defaults.target_column),
+        target_type=target_type,
+        verbose=True
+    )
+
+
 def build_data(
         c: Callable[[HeteroDataBuilder], _T],
         dataset=DEFAULT_DATASET_NAME,
@@ -227,10 +240,10 @@ def build_data(
     if has_sub_connection:
         conn = FITRelationalDataset.create_remote_connection(dataset)
 
-    if schema is None:
-        schema = SchemaAnalyzer(conn, verbose=True).guess_schema()
-
     defaults = FIT_DATASET_DEFAULTS[dataset]
+
+    if schema is None:
+        schema = get_schema_analyzer(conn, defaults).guess_schema()
 
     builder = HeteroDataBuilder(conn,
                                 schema,
@@ -253,12 +266,11 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
         data_config = DataConfig()
 
     with FITRelationalDataset.create_remote_connection(dataset) as conn:
-        schema_analyzer = SchemaAnalyzer(conn,
-                                         verbose=True)
+        defaults = FIT_DATASET_DEFAULTS[dataset]
+
+        schema_analyzer = get_schema_analyzer(conn, defaults)
 
         schema = schema_analyzer.guess_schema()
-
-        defaults = FIT_DATASET_DEFAULTS[dataset]
 
         data_pd, (data, column_defs, colnames) = build_data(
             lambda builder: (builder.build_as_pandas(), builder.build(with_column_names=True)),
@@ -269,7 +281,7 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
         )
 
         n_total = data[defaults.target_table].x.shape[0]
-        T.RandomNodeSplit('train_rest', num_val=int(0.10 * n_total), num_test=int(0.10 * n_total))(data)
+        T.RandomNodeSplit('train_rest', num_val=int(0.30 * n_total), num_test=0)(data)
 
         return data, data_pd, schema, defaults, column_defs, colnames
 
@@ -345,8 +357,12 @@ def main(
 
     trainer = L.Trainer(
         accelerator='gpu' if cuda else 'cpu',
+        devices=1,
         deterministic=True,
         callbacks=[L_callbacks.Timer(),
+                   L_callbacks.ModelCheckpoint('./torch-models/',
+                                               filename=dataset_name + '-{epoch}-{train_acc:.3f}-{val_acc:.3f}',
+                                               mode='max', monitor='val_acc'),
                    TimerOrEpochsCallback(epochs=epochs, min_train_time_s=min_train_time_s)],
         min_epochs=epochs,
         max_epochs=-1,
@@ -390,6 +406,12 @@ if __name__ == "__main__":
         with mlflow.start_run(run_name=f"{file_name} - {dataset} - {uuid.uuid4()}") as run:
             mlflow.set_tag('dataset', dataset)
             mlflow.set_tag('Model Source', file_name)
+
+            for k, v in asdict(model_config).items():
+                mlflow.log_param(k, v)
+
+            for k, v in asdict(data_config).items():
+                mlflow.log_param(k, v)
 
             try:
                 _run_main()
