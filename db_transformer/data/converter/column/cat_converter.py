@@ -29,11 +29,16 @@ class CategoricalConverter(SeriesConverter[CategoricalColumnDef]):
 
     def _guess_value_set(self, cardinality: int, column: pd.Series) -> Tuple[List[Any],
                                                                              Callable[[pd.Series], pd.Series]]:
+        # TODO: rewrite to make it more general and possibly support more ways of making the strings match
         MAPPINGS: List[Callable[[pd.Series], pd.Series]] = [
             lambda s: s,  # as-is
             lambda s: s.str.lower(),  # case insensitive
             lambda s: s.map(lambda s: unidecode.unidecode(s)),  # stripped accents
             lambda s: s.map(lambda s: unidecode.unidecode(s).lower()),  # stripped accents and CI
+            lambda s: s.str.strip(),  # stripped whitespaces
+            lambda s: s.str.lower().str.strip(),  # case insensitive and stripped whitespaces
+            lambda s: s.map(lambda s: unidecode.unidecode(s)).str.strip(),  # stripped accents and stripped whitespaces
+            lambda s: s.map(lambda s: unidecode.unidecode(s).lower()).str.strip(),  # stripped accents, CI, stripped
         ]
 
         choices: Dict[int, Tuple[List[Any], Callable[[pd.Series], pd.Series]]] = {}

@@ -28,6 +28,7 @@ class PandasConverter(SeriesConverter):
             new_series, column_def = segment(column)
 
             # skip if all values that weren't na in the original are all the same
+            # TODO remove? Is kinda confusing when you have less features than you expected to have
             if self.skip_if_allsame and new_series[column.notna()].nunique() <= 1:
                 continue
 

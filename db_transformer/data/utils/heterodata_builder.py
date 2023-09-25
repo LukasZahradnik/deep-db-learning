@@ -1,3 +1,4 @@
+import numbers
 import warnings
 from collections import OrderedDict
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union, overload
@@ -234,14 +235,23 @@ class HeteroDataBuilder:
         for table_name, table_schema in self.schema.items():
             for fk_def in table_schema.foreign_keys:
                 id = table_name, '-'.join(fk_def.columns), fk_def.ref_table
-                out[id].edge_index = self._fk_to_index(fk_def, table_dfs[table_name], table_dfs[fk_def.ref_table])
+                try:
+                    out[id].edge_index = self._fk_to_index(fk_def, table_dfs[table_name], table_dfs[fk_def.ref_table])
+                except Exception as e:
+                    warnings.warn(f"Failed to join on foreign key {id}. Reason: {e}")
 
         (target_df, _), column_defs = self._convert_dataframes_and_target(table_dfs)
 
         # set HeteroData target
         y = torch.from_numpy(target_df.to_numpy()).to(self.device)
-        if y.shape[-1] != 1:
-            raise ValueError("Target (y) shouldn't have more than 1 feature")
+        if y.shape[-1] > 1:
+            raise ValueError(f"Target ({self.target_table}.{self.target_column}) shouldn't have more than 1 feature. "
+                             "You might be using a converter for this column that produces multiple features from the "
+                             "original one, which is a bad idea for the target.")
+        elif y.shape[-1] < 1:
+            raise ValueError(f"Target ({self.target_column}) has no values after conversion. "
+                             "Did you forget to specify the correct column definition in schema? "
+                             "E.g. SchemaAnalyzer might need the target passed directly as a parameter.")
 
         out[self.target_table].y = y.squeeze(-1)
 

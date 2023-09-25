@@ -1,4 +1,6 @@
 import datetime
+from typing import Optional
+
 import pandas as pd
 
 from db_transformer.schema.columns import NumericColumnDef
@@ -19,10 +21,13 @@ class DateConverter(PandasConverter):
 
 
 def _get_seconds_since_midnight(s: pd.Series) -> pd.Series:
-    return ((s - s.dt.normalize()) / pd.Timedelta('1 second')).astype(int)
+    return ((s - s.dt.normalize()) / pd.Timedelta('1 second')).fillna(0).astype(int)
 
 
-def _get_seconds_since_midnight_time(t: datetime.time) -> int:
+def _get_seconds_since_midnight_time(t: Optional[datetime.time]) -> Optional[int]:
+    if t is None:
+        return None
+
     return t.second + (t.minute + t.hour * 60) * 60
 
 
