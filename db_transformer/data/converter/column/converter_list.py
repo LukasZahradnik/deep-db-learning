@@ -1,11 +1,11 @@
-from typing import Sequence
-from collections import OrderedDict
+from typing import List, Sequence, Tuple
 
 import pandas as pd
 from pandas.core.frame import itertools
-from .series_converter import SeriesConverter
+
 from db_transformer.schema.schema import ColumnDef
 
+from .series_converter import SeriesConverter
 
 __ALL__ = ['ConverterList']
 
@@ -14,23 +14,29 @@ class ConverterList(SeriesConverter):
     def __init__(self, *converters: SeriesConverter) -> None:
         self.converters = converters
 
-    def __call__(self, column_def: ColumnDef, column: pd.Series) -> Sequence[pd.Series]:
-        out_dict: OrderedDict[str, pd.Series] = OrderedDict()
+    def __call__(self, column_def: ColumnDef, column: pd.Series) -> Tuple[Sequence[pd.Series], Sequence[ColumnDef]]:
+        out: List[pd.Series] = []
+        out_column_defs: List[ColumnDef] = []
+
+        seen_names = set()
 
         for c in self.converters:
-            this_series = c(column_def, column)
+            series, column_defs = c(column_def, column)
 
-            for new_series in this_series:
-                the_name = str(new_series.name)
+            out_column_defs.extend(column_defs)
 
-                if the_name in out_dict:
+            for serie in series:
+                the_name = str(serie.name)
+
+                if the_name in seen_names:
                     for i in itertools.count():
                         the_name2 = the_name + str(i)
-                        if the_name2 not in out_dict:
-                            new_series.name = the_name2
-                            out_dict[the_name2] = new_series
+                        if the_name2 not in seen_names:
+                            seen_names.add(the_name2)
+                            serie.name = the_name2
                             break
                 else:
-                    out_dict[the_name] = new_series
+                    seen_names.add(the_name)
+                out.append(serie)
 
-        return list(out_dict.values())
+        return out, out_column_defs

@@ -1,14 +1,16 @@
 import re
+import warnings
 from functools import lru_cache
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Type, Union
+from typing import Dict, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
 
 import inflect
 import sqlalchemy.sql.functions as fn
+from sqlalchemy import column, table
 from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMTEXT
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import distinct, select
-from sqlalchemy.sql.expression import null
+from sqlalchemy.sql.expression import func, null
 from sqlalchemy.sql.operators import isnot
 from sqlalchemy.types import (
     TEXT,
@@ -53,17 +55,22 @@ __all__ = [
 ]
 
 
-class SchemaAnalyzer:
-    """
-    Helper class for retrieving a database :py:class:`Schema`, where column types (as interpreted by the machine learning pipeline)
-    are determined based on select heuristics. Can be subclassed to support other :py:class:`ColumnDef` instances as well.
+TargetType = Literal['categorical', 'numeric']
 
-    Caches the results of all database queries - in order to obtain fresh data after updating a database,
-    please create a new instance of the class.
+
+class SchemaAnalyzer:
+    """Auto-detect a database :py:class:`Schema`.
+
+    Column types (as interpreted by the machine learning pipeline)
+    are determined based on select heuristics.
+    Can be subclassed to support other :py:class:`ColumnDef` instances as well.
+
+    Caches the results of all database queries.
+    In order to obtain fresh data after updating a database, please create a new instance of the class.
     """
 
     DETERMINED_TYPES: Dict[Type[ColumnDef], Tuple[Type[TypeEngine], ...]] = {
-        TextColumnDef: (Text, TEXT, LONGTEXT, MEDIUMTEXT, Unicode, ),
+        TextColumnDef: (LONGTEXT, MEDIUMTEXT, Unicode, ),
         CategoricalColumnDef: (Boolean, ),
         NumericColumnDef: (Numeric, ),
         DateColumnDef: (Date, ),
@@ -81,9 +88,17 @@ class SchemaAnalyzer:
     COMMON_NUMERIC_COLUMN_NAME_REGEX = re.compile(
         r"balance|amount|size|duration|frequency|count|cnt|votes|score|number|age|year|month|day", re.IGNORECASE)  # TODO: add more?
 
+    FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_GUARANTEED_THRESHOLD = 0.05
+    """
+    The fraction of distinct values to total count of non-null values,
+    which decides (in some situations) that type must be categorical.
+    If the fraction is below this threshold, marks the column as categorical.
+    """
+
     FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.95
     """
-    The fraction of distinct values to total count of non-null values, which decides (in some situations) that type cannot be categorical.
+    The fraction of distinct values to total count of non-null values,
+    which decides (in some situations) that type cannot be categorical.
     If the fraction exceeds this threshold, marks the column as something other than categorical.
     """
 
@@ -102,18 +117,21 @@ class SchemaAnalyzer:
                  omit_filters: Union[SetFilterProtocol[Tuple[str, str]],
                                      Iterable[Tuple[str, str]], Tuple[str, str], None] = None,
                  target: Optional[Tuple[str, str]] = None,
+                 target_type: Optional[TargetType] = None,
                  verbose=False,
                  ) -> None:
-        """
+        """Construct the SchemaAnalyzer.
+
         :field connection: The database connection - instance of SQLAlchemny's `Connection` class, \
 or a custom :py:class:`DBInspector` or :py:class:`DBInspectorInterface` instance, which allows to \
 e.g. specify database tables or table columns to be completely ignored.
         :field omit_filters: A filter for (table_name, column_name) tuples. Can be one of the following:
             a) a list of such tuples, in which case they will all receive the :py:class:`OmitColumnDef` type
-            b) a :py:class:`db_transformer.helpers.collections.set_filter.SetFilter` instance, allowing to specify either a whitelist or a blacklist (or both), in which case \
+            b) a :py:class:`db_transformer.helpers.collections.set_filter.SetFilter` instance, allowing to specify \
+either a whitelist or a blacklist (or both), in which case \
 all that is *excluded* will receive the :py:class:`OmitColumnDef` type
-            c) a callable which, given a set of values, returns their subset. In this case all that is *excluded* will receive \
-the :py:class:`OmitColumnDef` type
+            c) a callable which, given a set of values, returns their subset. In this case all that is *excluded* \
+will receive the :py:class:`OmitColumnDef` type
         :field target: Tuple of (table_name, column_name) for the target table and column
         :field verbose: If true, will show executed `SELECT` statements, as well as a per-table progress bar.
         """
@@ -126,11 +144,13 @@ the :py:class:`OmitColumnDef` type
             inspector = CachedDBInspector(DBInspector(connection))
         else:
             raise TypeError(
-                f"database is neither {Connection.__name__}, nor an implementation of {DBInspectorInterface.__name__}: {connection}")
+                f"database is neither {Connection.__name__}, nor "
+                f"an implementation of {DBInspectorInterface.__name__}: {connection}")
 
         self._inspector = inspector
 
         self._target = target
+        self._target_type: Optional[TargetType] = target_type
 
         if isinstance(omit_filters, tuple):
             omit_filters = [omit_filters]
@@ -157,8 +177,8 @@ the :py:class:`OmitColumnDef` type
 
     @lru_cache(maxsize=None)
     def _get_all_foreign_key_columns(self, table: str) -> Set[str]:
-        """
-        A helper function for obtaining a set of all columns of a table that are part of (any) foreign key
+        """Obtain a set of all columns of a table that are part of (any) foreign key.
+
         (doesn't say which foreign key - they can be mixed). Caches its outputs using `@lru_cache`.
         """
         fks = self.db_inspector.get_foreign_keys(table)
@@ -169,43 +189,51 @@ the :py:class:`OmitColumnDef` type
         return out
 
     @lru_cache(maxsize=None)
-    def guess_categorical_cardinality(self, table: str, column: str) -> Optional[int]:
-        """
-        Queries the DB for the total number of distinct values present in a column.
+    def guess_categorical_cardinality(self, table_name: str, column_name: str) -> Optional[int]:
+        """Query the DB for the total number of distinct values present in a column.
 
         Equivalent to something like `SELECT count(*) FROM (SELECT DISTINCT [column] FROM [table])`.
 
         Caches its outputs using `@lru_cache`.
         """
         try:
-            tbl = self.db_inspector.get_orm_table(table)
-            col = getattr(tbl.c, column)
-            query = select(fn.count(distinct(col))).select_from(tbl)
+            tbl = table(table_name)
+            col = column(column_name)
+
+            # subquery instead of COUNT(DISTINCT [col]) in order to include null values in the count
+            query = select(fn.count()).select_from(
+                select(distinct(col)).select_from(tbl).subquery()
+            )
             return self.connection.scalar(query)
-        except OperationalError:
+        except OperationalError as e:
+            if self._verbose:
+                warnings.warn(str(e))
             return None
 
     @lru_cache(maxsize=None)
-    def query_no_nonnull(self, table: str, column: str) -> Optional[int]:
-        """
-        Queries the DB for the total number of non-null values present in a column.
+    def query_no_nonnull(self, table_name: str, column_name: str) -> Optional[int]:
+        """Query the DB for the total number of non-null values present in a column.
 
         Equivalent to `SELECT count([column]) FROM [table] WHERE [column] IS NOT NULL`
 
         Caches its outputs using `@lru_cache`
         """
         try:
-            tbl = self.db_inspector.get_orm_table(table)
-            col = getattr(tbl.c, column)
+            tbl = table(table_name)
+            col = column(column_name)
             query = select(fn.count(col)).select_from(tbl).where(isnot(col, null()))
             return self.connection.scalar(query)
-        except OperationalError:
+        except OperationalError as e:
+            if self._verbose:
+                warnings.warn(str(e))
             return None
 
-    def do_guess_column_type(self, table: str, column: str, in_primary_key: bool, must_have_type: bool, col_type: TypeEngine) -> Type[ColumnDef]:
+    def do_guess_column_type(self, table: str, column: str,
+                             in_primary_key: bool, must_have_type: bool, col_type: TypeEngine) -> Type[ColumnDef]:
         """
-        Determine the :py:class:`ColumnDef` subclass to use with the given table column, based on the
-        SQL column type, the values of the data, and other heuristics.
+        Determine the :py:class:`ColumnDef` subclass to use with the given table column.
+
+        Done based on the SQL column type, the values of the data, and other heuristics.
 
         Returns the class itself, not an instance of :py:class:`ColumnDef`.
 
@@ -224,7 +252,7 @@ the :py:class:`OmitColumnDef` type
                                  "but it cannot be omitted as it is the target.")
             return OmitColumnDef
 
-        if isinstance(col_type, (Integer, String)):
+        if isinstance(col_type, (Integer, String, Text, TEXT)):
             cardinality = self.guess_categorical_cardinality(table, column)
 
             # first check if it is an ID-like column name
@@ -248,9 +276,13 @@ the :py:class:`OmitColumnDef` type
                     return NumericColumnDef
 
                 return CategoricalColumnDef
-            elif isinstance(col_type, String):
+            else:
                 if cardinality is None or cardinality > self.STRING_CARDINALITY_THRESHOLD:
                     return TextColumnDef
+
+                if (n_nonnull is not None and
+                        cardinality / n_nonnull < self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_GUARANTEED_THRESHOLD):
+                    return CategoricalColumnDef
 
                 if (n_nonnull is not None and
                         cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
@@ -263,23 +295,28 @@ the :py:class:`OmitColumnDef` type
 
     def instantiate_column_type(self, table: str, column: str, in_primary_key: bool, cls: Type[ColumnDef]) -> ColumnDef:
         """
-        Instantiate the :py:class:`ColumnDef` subclass instance based on the subclass returned by :py:method:`do_guess_column_type`.
+        Instantiate the :py:class:`ColumnDef` subclass instance.
 
-        You may override this method in order to instantiate custom subclasses of :py:class:`ColumnDef` if you've overridden :py:method:`do_guess_column_type`.
+        You may override this method in order to instantiate custom subclasses of :py:class:`ColumnDef`
+        if you've overridden :py:method:`do_guess_column_type`.
         """
         if cls == CategoricalColumnDef:
             cardinality = self.guess_categorical_cardinality(table, column)
-            assert cardinality is not None, f"Column {table}.{column} was determined to be categorical but cardinality cannot be retrieved."
-            return CategoricalColumnDef(key=in_primary_key, card=cardinality)
+            assert cardinality is not None, (f"Column {table}.{column} was determined to be categorical "
+                                             "but cardinality cannot be retrieved.")
+            return CategoricalColumnDef(key=in_primary_key,
+                                        card=cardinality)
 
-        if cls in {NumericColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef, OmitColumnDef, TextColumnDef}:
+        if cls in {NumericColumnDef, DateColumnDef, DateTimeColumnDef,
+                   DurationColumnDef, TimeColumnDef, OmitColumnDef, TextColumnDef}:
             return cls(key=in_primary_key)
 
         raise TypeError(f"No logic for instantiating {cls.__name__} has been provided to {SchemaAnalyzer.__name__}.")
 
     def guess_column_type(self, table: str, column: str) -> ColumnDef:
-        """
-        Runs :py:method:`do_guess_column_type` as well as :py:method:`instantiate_column_type` together, and returns the instantiated :py:class:`ColumnDef`.
+        """Run :py:method:`do_guess_column_type` as well as :py:method:`instantiate_column_type` together.
+
+        Returns the instantiated :py:class:`ColumnDef`.
 
         Contains additional logic for foreign keys and filtering based on constructor input.
         """
@@ -291,13 +328,22 @@ the :py:class:`OmitColumnDef` type
         col_type = self.db_inspector.get_columns(table)[column]
         pk = self.db_inspector.get_primary_key(table)
         is_in_pk = column in pk
-        must_have_type = (table, column) == self._target
+        is_target = (table, column) == self._target
 
-        if not must_have_type:
+        guessed_type: Optional[Type[ColumnDef]] = None
+        if is_target and self._target_type is not None:
+            if self._target_type == 'categorical':
+                guessed_type = CategoricalColumnDef
+            elif self._target_type == 'numeric':
+                guessed_type = NumericColumnDef
+            else:
+                raise ValueError()
+        else:
             if is_in_pk and len(pk) == 1:
                 # This is the only primary key column.
                 # The column is thus most likely purely an identifier of the row, without holding any extra information,
-                # whereas if there are more columns part of the primary key, then we can more likely assume that it conveys more information.
+                # whereas if there are more columns part of the primary key, then we
+                # can more likely assume that it conveys more information.
 
                 # Thus, we will mark this as "omit", to signify that this column should not be a feature
                 return OmitColumnDef(key=True)
@@ -309,28 +355,29 @@ the :py:class:`OmitColumnDef` type
                 return OmitColumnDef(key=is_in_pk)
 
         # delegate to other methods
-        guessed_type = self.do_guess_column_type(
-            table, column, in_primary_key=is_in_pk, must_have_type=must_have_type, col_type=col_type)
+        if guessed_type is None:
+            guessed_type = self.do_guess_column_type(
+                table, column, in_primary_key=is_in_pk, must_have_type=is_target, col_type=col_type)
 
-        if must_have_type and isinstance(guessed_type, OmitColumnDef):
+        if is_target and isinstance(guessed_type, OmitColumnDef):
             raise TypeError(f"Column '{column}' in table '{table}' cannot be omitted.")
 
         return self.instantiate_column_type(table, column, in_primary_key=is_in_pk, cls=guessed_type)
 
     def guess_schema(self) -> Schema:
-        """
-        Locates all database tables and all columns and runs :py:method:`guess_column_type` for all of them.
+        """Locate all database tables and all columns and run :py:method:`guess_column_type` for all of them.
+
         Returns the result as a :py:class:`Schema`.
         """
         schema = Schema()
 
-        for table in wrap_progress(self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"):
+        for table_name in wrap_progress(self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"):
             column_defs = ColumnDefs()
-            fks: List[ForeignKeyDef] = list(self.db_inspector.get_foreign_keys(table).values())
-            for column in self.db_inspector.get_columns(table):
-                column_defs[column] = self.guess_column_type(table, column)
+            fks: List[ForeignKeyDef] = list(self.db_inspector.get_foreign_keys(table_name).values())
+            for column_name in self.db_inspector.get_columns(table_name):
+                column_defs[column_name] = self.guess_column_type(table_name, column_name)
 
-            schema[table] = TableSchema(columns=column_defs, foreign_keys=fks)
+            schema[table_name] = TableSchema(columns=column_defs, foreign_keys=fks)
 
         return schema
 
