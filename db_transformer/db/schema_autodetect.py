@@ -102,16 +102,6 @@ class SchemaAnalyzer:
     If the fraction exceeds this threshold, marks the column as something other than categorical.
     """
 
-    STRING_CARDINALITY_THRESHOLD = 800
-    """
-    Cardinality threshold below which string types are assumed categorical, and above which are assumed numeric.
-    """
-
-    INTEGER_CARDINALITY_THRESHOLD = 10000
-    """
-    Cardinality threshold below which integer types are assumed categorical, and above which are assumed numeric.
-    """
-
     def __init__(self,
                  connection: Union[Connection, DBInspector, DBInspectorInterface],
                  omit_filters: Union[SetFilterProtocol[Tuple[str, str]],
@@ -176,15 +166,16 @@ will receive the :py:class:`OmitColumnDef` type
         return self._inspector
 
     @lru_cache(maxsize=None)
-    def _get_all_foreign_key_columns(self, table: str) -> Set[str]:
-        """Obtain a set of all columns of a table that are part of (any) foreign key.
+    def _get_all_non_composite_foreign_key_columns(self, table: str) -> Set[str]:
+        """Obtain a set of all columns of a table that are part of any non-composite foreign key.
 
         (doesn't say which foreign key - they can be mixed). Caches its outputs using `@lru_cache`.
         """
         fks = self.db_inspector.get_foreign_keys(table)
         out = set()
         for fk in fks.keys():
-            out |= fk
+            if len(fk) <= 1:
+                out |= fk
 
         return out
 
@@ -255,15 +246,15 @@ will receive the :py:class:`OmitColumnDef` type
         if isinstance(col_type, (Integer, String, Text, TEXT)):
             cardinality = self.guess_categorical_cardinality(table, column)
 
-            # first check if it is an ID-like column name
-            if not must_have_type and cardinality is not None and self.ID_NAME_REGEX.search(column):
-
-                # check if there are too many distinct values compared to total
-                if (n_nonnull is not None and
-                        cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
-                    return OmitColumnDef
-
             if isinstance(col_type, Integer):
+                # check if there are too many distinct values compared to total
+                if cardinality is None or (n_nonnull is not None and
+                                           cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
+                    if not must_have_type and self.ID_NAME_REGEX.search(column):
+                        return OmitColumnDef
+
+                    return NumericColumnDef
+
                 # try matching based on common regex names
                 if self.COMMON_NUMERIC_COLUMN_NAME_REGEX.search(column):
                     return NumericColumnDef
@@ -272,20 +263,14 @@ will receive the :py:class:`OmitColumnDef` type
                 if self._inflect.singular_noun(column) is not False:
                     return NumericColumnDef
 
-                if cardinality is None or cardinality > self.INTEGER_CARDINALITY_THRESHOLD:
-                    return NumericColumnDef
-
                 return CategoricalColumnDef
             else:
-                if cardinality is None or cardinality > self.STRING_CARDINALITY_THRESHOLD:
-                    return TextColumnDef
+                # check if there are too many distinct values compared to total
+                if cardinality is None or (n_nonnull is not None and
+                                           cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
+                    if not must_have_type and self.ID_NAME_REGEX.search(column):
+                        return OmitColumnDef
 
-                if (n_nonnull is not None and
-                        cardinality / n_nonnull < self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_GUARANTEED_THRESHOLD):
-                    return CategoricalColumnDef
-
-                if (n_nonnull is not None and
-                        cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
                     return TextColumnDef
 
                 return CategoricalColumnDef
@@ -348,10 +333,10 @@ will receive the :py:class:`OmitColumnDef` type
                 # Thus, we will mark this as "omit", to signify that this column should not be a feature
                 return OmitColumnDef(key=True)
 
-            # if the column is part of a foreign key constraint, return "omit" ColumnDef
+            # if the column is part of a non-composite foreign key constraint, return "omit" ColumnDef
             # instead of the actual column type, as it most likely should not be a feature
-            fks = self._get_all_foreign_key_columns(table)
-            if column in fks:
+            non_comp_fks = self._get_all_non_composite_foreign_key_columns(table)
+            if column in non_comp_fks:
                 return OmitColumnDef(key=is_in_pk)
 
         # delegate to other methods
