@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 from sqlalchemy.engine import Connection, Engine, create_engine, make_url
 from sqlalchemy.engine.url import URL
@@ -64,7 +64,7 @@ class FITRelationalDataset(DBDataset):
         return Connection(create_engine(cls.get_url(dataset, connector)))
 
     @classmethod
-    def create_schema_analyzer(cls, dataset: str, connection: Connection, verbose=True, **kwargs) -> SchemaAnalyzer:
+    def create_schema_analyzer(cls, dataset: str, connection: Connection, verbose=False, **kwargs) -> SchemaAnalyzer:
         defaults = FIT_DATASET_DEFAULTS[dataset]
         target_type = 'categorical' if defaults.task == TaskType.CLASSIFICATION else 'numeric'
         return SchemaAnalyzer(
@@ -77,6 +77,10 @@ class FITRelationalDataset(DBDataset):
             post_guess_schema_hook=defaults.schema_fixer,
             **kwargs,
         )
+
+    @classmethod
+    def get_target(cls, dataset: str) -> Tuple[str, str]:
+        return FIT_DATASET_DEFAULTS[dataset].target
 
 
 if __name__ == "__main__":
