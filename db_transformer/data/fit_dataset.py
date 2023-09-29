@@ -7,9 +7,10 @@ from torch_geometric.data.dataset import Union
 
 from db_transformer.data.convertor.schema_convertor import SchemaConvertor
 from db_transformer.data.dataset import DBDataset
-from db_transformer.data.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS
+from db_transformer.data.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS, TaskType
 from db_transformer.data.strategy.bfs import BFSStrategy
 from db_transformer.data.strategy.strategy import BaseStrategy
+from db_transformer.db.schema_autodetect import SchemaAnalyzer
 from db_transformer.schema import Schema
 
 
@@ -61,6 +62,21 @@ class FITRelationalDataset(DBDataset):
         Don't forget to close the Connection after you are done using it!
         """
         return Connection(create_engine(cls.get_url(dataset, connector)))
+
+    @classmethod
+    def create_schema_analyzer(cls, dataset: str, connection: Connection, verbose=True, **kwargs) -> SchemaAnalyzer:
+        defaults = FIT_DATASET_DEFAULTS[dataset]
+        target_type = 'categorical' if defaults.task == TaskType.CLASSIFICATION else 'numeric'
+        return SchemaAnalyzer(
+            connection,
+            target=defaults.target,
+            target_type=target_type,
+            verbose=verbose,
+            db_distinct_counter=defaults.db_distinct_counter,
+            force_collation=defaults.force_collation,
+            post_guess_schema_hook=defaults.schema_fixer,
+            **kwargs,
+        )
 
 
 if __name__ == "__main__":

@@ -18,7 +18,6 @@ from db_transformer.data.embedder import CatEmbedder, NumEmbedder
 from db_transformer.data.embedder.embedders import SingleTableEmbedder
 from db_transformer.data.fit_dataset import FITRelationalDataset
 from db_transformer.data.utils import HeteroDataBuilder
-from db_transformer.db.schema_autodetect import SchemaAnalyzer
 from db_transformer.helpers.timer import Timer
 from db_transformer.schema.columns import CategoricalColumnDef, NumericColumnDef
 from db_transformer.schema.schema import ColumnDef, Schema
@@ -53,7 +52,7 @@ DatasetType = Literal[
 ]
 
 
-DEFAULT_DATASET_NAME: DatasetType = 'voc'
+DEFAULT_DATASET_NAME: DatasetType = 'geneea'
 
 
 @dataclass
@@ -218,17 +217,6 @@ class SimpleDataset(Dataset[_T]):
         return self._data[index]
 
 
-def get_schema_analyzer(conn: Connection, defaults: FITDatasetDefaults) -> SchemaAnalyzer:
-    target_type = 'categorical' if defaults.task == TaskType.CLASSIFICATION else 'numeric'
-
-    return SchemaAnalyzer(
-        conn,
-        target=(defaults.target_table, defaults.target_column),
-        target_type=target_type,
-        verbose=True
-    )
-
-
 def build_data(
         c: Callable[[HeteroDataBuilder], _T],
         dataset=DEFAULT_DATASET_NAME,
@@ -243,7 +231,8 @@ def build_data(
     defaults = FIT_DATASET_DEFAULTS[dataset]
 
     if schema is None:
-        schema = get_schema_analyzer(conn, defaults).guess_schema()
+        schema = FITRelationalDataset.create_schema_analyzer(
+            dataset, conn, verbose=True).guess_schema()
 
     builder = HeteroDataBuilder(conn,
                                 schema,
@@ -268,9 +257,11 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
     with FITRelationalDataset.create_remote_connection(dataset) as conn:
         defaults = FIT_DATASET_DEFAULTS[dataset]
 
-        schema_analyzer = get_schema_analyzer(conn, defaults)
+        schema_analyzer = FITRelationalDataset.create_schema_analyzer(dataset, conn, verbose=True)
 
         schema = schema_analyzer.guess_schema()
+        if defaults.schema_fixer is not None:
+            defaults.schema_fixer(schema)
 
         data_pd, (data, column_defs, colnames) = build_data(
             lambda builder: (builder.build_as_pandas(), builder.build(with_column_names=True)),

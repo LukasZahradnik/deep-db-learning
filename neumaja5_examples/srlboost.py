@@ -4,7 +4,7 @@ import os
 import random
 import uuid
 from pathlib import Path
-from typing import Any, Iterable, Literal, TextIO
+from typing import Any, Iterable, Literal
 from typing import get_args as t_get_args
 
 import lovely_tensors as lt
@@ -14,10 +14,9 @@ import pandas as pd
 import srlearn.base as srlearn_base
 import torch
 import torch_geometric.transforms as T
-from db_transformer.data.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS, TaskType
+from db_transformer.data.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS
 from db_transformer.data.fit_dataset import FITRelationalDataset
 from db_transformer.data.utils.heterodata_builder import HeteroDataBuilder
-from db_transformer.db.schema_autodetect import SchemaAnalyzer
 from db_transformer.schema.columns import CategoricalColumnDef
 from db_transformer.schema.schema import ForeignKeyDef, Schema
 from slugify import slugify
@@ -46,7 +45,7 @@ DatasetType = Literal[
 ]
 
 
-DEFAULT_DATASET_NAME: DatasetType = 'CORA'
+DEFAULT_DATASET_NAME: DatasetType = 'imdb_ijs'
 
 
 def _sanitize_value(value) -> str:
@@ -247,82 +246,6 @@ def build_dataset(schema: Schema, dfs: dict[str, pd.DataFrame], target: tuple[st
     return train, test
 
 
-def output_dataset(dataset_name: str, schema: Schema, dfs: dict[str, pd.DataFrame], target: tuple[str, str], train_mask: np.ndarray, val_mask: np.ndarray, path: Path):
-
-    path.mkdir(exist_ok=True)
-
-    def _output_all_non_target(fp: TextIO):
-        for table_name, table_def in schema.items():
-            for column_name, column_def in table_def.columns.items():
-                if (table_name, column_name) != target:
-                    feature_to_fact(table_name, column_name, dfs[table_name], schema, fp=fp)
-            for fk_def in table_def.foreign_keys:
-                foreign_key_to_fact(table_name, fk_def, dfs[table_name], schema, fp=fp)
-
-    def _output_bk(fp: TextIO, target_value: str):
-        print("usePrologVariables: true.", file=fp)
-        print(
-            f"queryPred: {get_fact_name(get_fact_def_for_target(target[0], target[1], target_value, schema))}/1.", file=fp)
-
-        for fact_name, row_name, feature_name in get_all_feature_fact_defs(schema, target):
-            print(f"mode: {fact_name}(+{row_name}, #{feature_name}).", file=fp)
-        for fact_name, row_left_name, row_right_name in get_all_fk_fact_defs(schema):
-            print(f"mode: {fact_name}(+{row_left_name}, -{row_right_name}).", file=fp)
-            print(f"mode: {fact_name}(-{row_left_name}, +{row_right_name}).", file=fp)
-
-        fact_name, row_name, _ = get_fact_def_for_target(*target, target_value, schema)
-        print(f"mode: {fact_name}(+{row_name}).", file=fp)
-
-    target_df = dfs[target[0]]
-
-    target_values = target_df[target[1]].unique()
-
-    if len(target_values) == 2:
-        assert len([tl for tl in target_values if tl]) > 0
-        target_values = [tl for tl in target_values if tl][:1]
-
-    for fact_def in get_all_fact_defs(schema, target, target_values):
-        print(fact_def)
-
-    for target_value in target_values:
-        dir_this = path / target_value
-        dir_this.mkdir(exist_ok=True)
-
-        train_dir = dir_this / 'train'
-        test_dir = dir_this / 'test'
-
-        train_dir.mkdir(exist_ok=True)
-        test_dir.mkdir(exist_ok=True)
-
-        with open(train_dir / 'train_facts.txt', 'w') as fp:
-            _output_all_non_target(fp)
-
-        with open(test_dir / 'test_facts.txt', 'w') as fp:
-            _output_all_non_target(fp)
-
-        with open(train_dir / 'train_bk.txt', 'w') as fp:
-            _output_bk(fp, target_value)
-
-        with open(test_dir / 'test_bk.txt', 'w') as fp:
-            _output_bk(fp, target_value)
-
-        train_df = target_df[pd.Series(train_mask)]
-        train_df_pos = train_df[train_df[target[1]] == target_value]
-        train_df_neg = train_df[train_df[target[1]] != target_value]
-        with open(train_dir / 'train_pos.txt', 'w') as fp:
-            target_to_fact(target[0], target[1], target_value, train_df_pos, schema, fp=fp)
-        with open(train_dir / 'train_neg.txt', 'w') as fp:
-            target_to_fact(target[0], target[1], target_value, train_df_neg, schema, fp=fp)
-
-        test_df = target_df[pd.Series(val_mask)]
-        test_df_pos = test_df[test_df[target[1]] == target_value]
-        test_df_neg = test_df[test_df[target[1]] != target_value]
-        with open(test_dir / 'test_pos.txt', 'w') as fp:
-            target_to_fact(target[0], target[1], target_value, test_df_pos, schema, fp=fp)
-        with open(test_dir / 'test_neg.txt', 'w') as fp:
-            target_to_fact(target[0], target[1], target_value, test_df_neg, schema, fp=fp)
-
-
 class CustomFileSystem(FileSystem):
     def __init__(self, dataset_name: str, target_value: str):
         jar_root = Path(srlearn_base.__file__).parent
@@ -334,7 +257,7 @@ class CustomFileSystem(FileSystem):
         dataset_dir = data / dataset_name
         dataset_dir.mkdir(exist_ok=True)
 
-        directory = dataset_dir / target_value
+        directory = dataset_dir / slugify(str(target_value))
         directory.mkdir(exist_ok=True)
 
         self.files = BoostSRLFiles(directory, jar_root)
@@ -356,14 +279,8 @@ def run(dataset_name: str) -> dict[str, Any]:
     with FITRelationalDataset.create_remote_connection(dataset_name) as conn:
         defaults = FIT_DATASET_DEFAULTS[dataset_name]
 
-        target_type = 'categorical' if defaults.task == TaskType.CLASSIFICATION else 'numeric'
-
-        schema = SchemaAnalyzer(
-            conn,
-            target=(defaults.target_table, defaults.target_column),
-            target_type=target_type,
-            verbose=True
-        ).guess_schema()
+        schema = FITRelationalDataset.create_schema_analyzer(
+            dataset_name, conn, verbose=True).guess_schema()
 
         builder = HeteroDataBuilder(conn,
                                     schema,

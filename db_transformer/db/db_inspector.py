@@ -4,60 +4,51 @@ from typing import Dict, FrozenSet, Optional, Set, Tuple
 
 import sqlalchemy
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.schema import Table
 from sqlalchemy.types import TypeEngine
 
 from db_transformer.helpers.collections.set_filter import SetFilterProtocol
 from db_transformer.schema.schema import ForeignKeyDef
 
+__ALL__ = [
+    'DBInspectorInterface',
+    'DBInspector',
+    'CachedDBInspector',
+]
+
 
 class DBInspectorInterface(ABC):
-    """
-    The interface for :py:class:`DBInspector`.
-    """
+    """The interface for :py:class:`DBInspector`."""
 
     @property
     @abstractmethod
     def connection(self) -> Connection:
-        """
-        The underlying SQLAlchemy `Connection`.
-        """
+        """The underlying SQLAlchemy `Connection`."""
         ...
 
     @property
     @abstractmethod
     def engine(self) -> Engine:
-        """
-        The underlying SQLAlchemy `Engine`.
-        """
+        """The underlying SQLAlchemy `Engine`."""
         ...
 
     @abstractmethod
     def get_tables(self) -> Set[str]:
-        """
-        Get all tables in the databases as a set.
-        """
+        """Get all tables in the databases as a set."""
         ...
 
     @abstractmethod
     def get_columns(self, table: str) -> Dict[str, TypeEngine]:
-        """
-        Get all columns in a table as a dictionary of string -> SQLAlchemy type
-        """
+        """Get all columns in a table as a dictionary of string -> SQLAlchemy type."""
         ...
 
     @abstractmethod
     def get_table_column_pairs(self) -> Set[Tuple[str, str]]:
-        """
-        Get all (table, column) pairs in the database as a set.
-        """
+        """Get all (table, column) pairs in the database as a set."""
         ...
 
     @abstractmethod
     def get_primary_key(self, table: str) -> Set[str]:
-        """
-        Get the primary key of the given table as a set of column names.
-        """
+        """Get the primary key of the given table as a set of column names."""
         ...
 
     @abstractmethod
@@ -85,7 +76,6 @@ class DBInspector(DBInspectorInterface):
         :field table_filter: A :py:class:`db_transformer.helpers.collections.set_filter.SetFilter` instance or a callable that filters a set of values. \
 All values that remain are the tables that the inspector will be aware of; excluded ones will be ignored.
         """
-
         self._connection = connection
         self._inspect = sqlalchemy.inspect(self._connection.engine)
         self._table_filter = table_filter
@@ -156,15 +146,10 @@ All values that remain are the tables that the inspector will be aware of; exclu
 
 
 class CachedDBInspector(DBInspectorInterface):
-    """
-    :py:class:`DBInspector`, but that caches its results instead of repeated SQL calls/retrievals.
-    """
+    """:py:class:`DBInspector`, but that caches its results instead of repeated SQL calls/retrievals."""
 
     def __init__(self, delegate: DBInspectorInterface):
-        """
-        :field delegate: The :py:class:`DBInspectorInterface` instance to cache the results of. :py:class:`CachedDBInspector` will delegate the function calls to this instance.
-        """
-
+        """:field delegate: The :py:class:`DBInspectorInterface` instance to cache the results of. :py:class:`CachedDBInspector` will delegate the function calls to this instance."""
         if isinstance(delegate, CachedDBInspector):
             raise TypeError("DatabaseWrapper is already cached.")
 
