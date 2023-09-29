@@ -47,33 +47,33 @@ with FITRelationalDataset.create_remote_connection(DATASET_NAME) as conn:
 
     data, column_defs, colnames = data_builder.build(with_column_names=True)
 
-    x_dict = data.collect('x')
+x_dict = data.collect('x')
 
-    print(data)
+print(data)
 
-    for name, x in x_dict.items():
-        print(name.rjust(10), x)
+for name, x in x_dict.items():
+    print(name.rjust(10), x)
 
-    print()
-    print("Embedding...")
+print()
+print("Embedding...")
 
-    embedder = TableEmbedder(
-        (CategoricalColumnDef, lambda: CatEmbedder(DIM)),
-        (NumericColumnDef, lambda: NumEmbedder(DIM)),
-        dim=DIM,
-        column_defs=column_defs,
-        column_names=colnames,
-    )
+embedder = TableEmbedder(
+    (CategoricalColumnDef, lambda: CatEmbedder(DIM)),
+    (NumericColumnDef, lambda: NumEmbedder(DIM)),
+    dim=DIM,
+    column_defs=column_defs,
+    column_names=colnames,
+)
 
-    x_dict = embedder(x_dict)
+x_dict = embedder(x_dict)
 
-    for name, x in x_dict.items():
-        print(name.rjust(10), x)
+for name, x in x_dict.items():
+    print(name.rjust(10), x)
 
-    print()
-    print("Expanding tables without features with zeros... (must come after embedding!)")
-    x_dict = _expand_with_zeros(x_dict)
+print()
+print("Expanding tables without features with zeros... (must come after embedding!)")
+x_dict = _expand_with_zeros(x_dict)
 
-    for name, x in x_dict.items():
-        print(name.rjust(10), x)
+for name, x in x_dict.items():
+    print(name.rjust(10), x)
 
