@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List, Tuple
 
 import lovely_tensors as lt
 import torch
@@ -10,21 +10,29 @@ from db_transformer.data.utils.heterodata_builder import HeteroDataBuilder
 from db_transformer.schema.columns import CategoricalColumnDef, NumericColumnDef
 from torch_geometric.data.data import NodeType
 
+from db_transformer.schema.schema import ColumnDef
+
 DATASET_NAME = 'CORA'
 DIM = 64
 
 lt.monkey_patch()
 
-def _expand_with_zeros(x_dict: Dict[NodeType, torch.Tensor]) -> Dict[NodeType, torch.Tensor]:
-    out: Dict[NodeType, torch.Tensor]= {}
+
+def _expand_with_zeros(x_dict: Dict[NodeType, torch.Tensor], column_defs: Dict[NodeType, List[ColumnDef]]) -> Tuple[
+        Dict[NodeType, torch.Tensor], Dict[NodeType, List[ColumnDef]]]:
+    out_x_dict: Dict[NodeType, torch.Tensor] = {}
+    out_column_defs: Dict[NodeType, List[ColumnDef]] = {}
 
     for name, x in x_dict.items():
-        if x.shape[-2] == 0:
-            out[name] = torch.zeros((*x.shape[:-2], 1, x.shape[-1]), dtype=x.dtype)
+        if x.shape[-1] == 0:
+            out_x_dict[name] = torch.zeros((*x.shape[:-1], 1), dtype=x.dtype)
+            out_column_defs[name] = [CategoricalColumnDef(card=1)]
         else:
-            out[name] = x
+            out_x_dict[name] = x
+            out_column_defs[name] = column_defs[name]
 
-    return out
+    return out_x_dict, out_column_defs
+
 
 with FITRelationalDataset.create_remote_connection(DATASET_NAME) as conn:
     print("Guessing schema...")
@@ -54,6 +62,13 @@ print(data)
 for name, x in x_dict.items():
     print(name.rjust(10), x)
 
+
+print()
+print("Expanding tables without features with zeros...")
+x_dict, column_defs = _expand_with_zeros(x_dict, column_defs)
+
+for name, x in x_dict.items():
+    print(name.rjust(10), x)
 print()
 print("Embedding...")
 
@@ -69,11 +84,3 @@ x_dict = embedder(x_dict)
 
 for name, x in x_dict.items():
     print(name.rjust(10), x)
-
-print()
-print("Expanding tables without features with zeros... (must come after embedding!)")
-x_dict = _expand_with_zeros(x_dict)
-
-for name, x in x_dict.items():
-    print(name.rjust(10), x)
-
