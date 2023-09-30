@@ -44,7 +44,9 @@ class SingleTableEmbedder(torch.nn.Module):
         return vals
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        assert input.shape[-1] == len(self.embedders)
+        if input.shape[-1] != len(self.embedders):
+            raise ValueError(f"There are {len(self.embedders)} features expected for this embedder, "
+                             f"but the input tensor has shape {list(input.shape)}, i.e. {input.shape[-1]} features.")
 
         if input.shape[-1] == 0:
             return input.unsqueeze(-1).repeat([*([1] * input.dim()), self.dim])

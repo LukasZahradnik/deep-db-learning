@@ -19,7 +19,7 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
     This is not the case for traditional python `dict`.
     """
 
-    def __new__(cls, *kargs, **kwargs) -> 'DotDict[_Value]':
+    def __new__(cls, *kargs, **kwargs):
         out = object.__new__(cls)
         object.__setattr__(out, '_DotDict__data', {})
         return out
@@ -104,7 +104,7 @@ class OrderedDotDict(Generic[_Value], DotDict[_Value]):
     This is not the case for traditional python `dict`.
     """
 
-    def __new__(cls, *kargs, **kwargs) -> 'OrderedDotDict[_Value]':
+    def __new__(cls, *kargs, **kwargs):
         out = object.__new__(cls)
         object.__setattr__(out, '_DotDict__data', OrderedDict())
         return out

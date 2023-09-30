@@ -1,7 +1,8 @@
 import re
 import warnings
 from functools import lru_cache
-from typing import Dict, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
+from typing import Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
+from typing import get_args as t_get_args
 
 import inflect
 import sqlalchemy.sql.functions as fn
@@ -10,7 +11,7 @@ from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMTEXT
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import distinct, select
-from sqlalchemy.sql.expression import func, null
+from sqlalchemy.sql.expression import null
 from sqlalchemy.sql.operators import isnot
 from sqlalchemy.types import (
     TEXT,
@@ -31,6 +32,12 @@ from db_transformer.db.db_inspector import (
     CachedDBInspector,
     DBInspector,
     DBInspectorInterface,
+)
+from db_transformer.db.distinct_cnt_retrieval import (
+    DBDistinctCounter,
+    DBFullDataFetchLocalDistinctCounter,
+    SimpleDBDistinctCounter,
+    SimpleStringSeriesMapper,
 )
 from db_transformer.helpers.collections.set_filter import SetFilter, SetFilterProtocol
 from db_transformer.helpers.progress import wrap_progress
@@ -56,6 +63,39 @@ __all__ = [
 
 
 TargetType = Literal['categorical', 'numeric']
+
+BuiltinDBDistinctCounter = Literal[
+    'db_distinct',
+    'fetchall_noop',
+    'fetchall_rstrip', 'fetchall_strip', 'fetchall_unidecode', 'fetchall_ci',
+    'fetchall_rstrip_ci', 'fetchall_strip_ci', 'fetchall_unidecode_ci',
+    'fetchall_unidecode_rstrip', 'fetchall_unidecode_strip',
+    'fetchall_unidecode_rstrip_ci', 'fetchall_unidecode_strip_ci',
+]
+
+
+def _get_db_distinct_counter(cnt: Union[DBDistinctCounter, BuiltinDBDistinctCounter],
+                            force_collation: Optional[str] = None) -> DBDistinctCounter:
+    if isinstance(cnt, str):
+        if cnt not in t_get_args(BuiltinDBDistinctCounter):
+            raise ValueError(f"Unknown DBDistinctCounter '{cnt}'. "
+                             f"Must be a lambda or one of: {t_get_args(BuiltinDBDistinctCounter)}.")
+
+        if cnt == 'db_distinct':
+            return SimpleDBDistinctCounter(force_collation=force_collation)
+
+        assert cnt.startswith('fetchall_')
+        mapper: SimpleStringSeriesMapper = cnt[len('fetchall_'):]
+
+        if force_collation is not None:
+            raise ValueError("You can only use the 'force_collation' parameter with 'db_distinct' DBDistinctCounter.")
+
+        return DBFullDataFetchLocalDistinctCounter(mapper)
+    else:
+        if force_collation is not None:
+            raise ValueError("You can only use the 'force_collation' parameter with 'db_distinct' DBDistinctCounter.")
+
+        return cnt
 
 
 class SchemaAnalyzer:
@@ -102,22 +142,15 @@ class SchemaAnalyzer:
     If the fraction exceeds this threshold, marks the column as something other than categorical.
     """
 
-    STRING_CARDINALITY_THRESHOLD = 800
-    """
-    Cardinality threshold below which string types are assumed categorical, and above which are assumed numeric.
-    """
-
-    INTEGER_CARDINALITY_THRESHOLD = 10000
-    """
-    Cardinality threshold below which integer types are assumed categorical, and above which are assumed numeric.
-    """
-
     def __init__(self,
                  connection: Union[Connection, DBInspector, DBInspectorInterface],
                  omit_filters: Union[SetFilterProtocol[Tuple[str, str]],
                                      Iterable[Tuple[str, str]], Tuple[str, str], None] = None,
                  target: Optional[Tuple[str, str]] = None,
                  target_type: Optional[TargetType] = None,
+                 db_distinct_counter: Union[DBDistinctCounter, BuiltinDBDistinctCounter] = 'db_distinct',
+                 force_collation: Optional[str] = None,
+                 post_guess_schema_hook: Optional[Callable[[Schema], None]] = None,
                  verbose=False,
                  ) -> None:
         """Construct the SchemaAnalyzer.
@@ -151,6 +184,9 @@ will receive the :py:class:`OmitColumnDef` type
 
         self._target = target
         self._target_type: Optional[TargetType] = target_type
+        self._db_distinct_counter = _get_db_distinct_counter(db_distinct_counter, force_collation)
+        self._force_collation = force_collation
+        self._post_guess_schema_hook = post_guess_schema_hook
 
         if isinstance(omit_filters, tuple):
             omit_filters = [omit_filters]
@@ -176,20 +212,21 @@ will receive the :py:class:`OmitColumnDef` type
         return self._inspector
 
     @lru_cache(maxsize=None)
-    def _get_all_foreign_key_columns(self, table: str) -> Set[str]:
-        """Obtain a set of all columns of a table that are part of (any) foreign key.
+    def _get_all_non_composite_foreign_key_columns(self, table: str) -> Set[str]:
+        """Obtain a set of all columns of a table that are part of any non-composite foreign key.
 
         (doesn't say which foreign key - they can be mixed). Caches its outputs using `@lru_cache`.
         """
         fks = self.db_inspector.get_foreign_keys(table)
         out = set()
         for fk in fks.keys():
-            out |= fk
+            if len(fk) <= 1:
+                out |= fk
 
         return out
 
     @lru_cache(maxsize=None)
-    def guess_categorical_cardinality(self, table_name: str, column_name: str) -> Optional[int]:
+    def guess_categorical_cardinality(self, table_name: str, column_name: str, col_type: TypeEngine) -> Optional[int]:
         """Query the DB for the total number of distinct values present in a column.
 
         Equivalent to something like `SELECT count(*) FROM (SELECT DISTINCT [column] FROM [table])`.
@@ -197,14 +234,7 @@ will receive the :py:class:`OmitColumnDef` type
         Caches its outputs using `@lru_cache`.
         """
         try:
-            tbl = table(table_name)
-            col = column(column_name)
-
-            # subquery instead of COUNT(DISTINCT [col]) in order to include null values in the count
-            query = select(fn.count()).select_from(
-                select(distinct(col)).select_from(tbl).subquery()
-            )
-            return self.connection.scalar(query)
+            return self._db_distinct_counter(self.connection, table_name, column_name, col_type)
         except OperationalError as e:
             if self._verbose:
                 warnings.warn(str(e))
@@ -253,17 +283,17 @@ will receive the :py:class:`OmitColumnDef` type
             return OmitColumnDef
 
         if isinstance(col_type, (Integer, String, Text, TEXT)):
-            cardinality = self.guess_categorical_cardinality(table, column)
-
-            # first check if it is an ID-like column name
-            if not must_have_type and cardinality is not None and self.ID_NAME_REGEX.search(column):
-
-                # check if there are too many distinct values compared to total
-                if (n_nonnull is not None and
-                        cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
-                    return OmitColumnDef
+            cardinality = self.guess_categorical_cardinality(table, column, col_type)
 
             if isinstance(col_type, Integer):
+                # check if there are too many distinct values compared to total
+                if cardinality is None or (n_nonnull is not None and
+                                           cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
+                    if not must_have_type and self.ID_NAME_REGEX.search(column):
+                        return OmitColumnDef
+
+                    return NumericColumnDef
+
                 # try matching based on common regex names
                 if self.COMMON_NUMERIC_COLUMN_NAME_REGEX.search(column):
                     return NumericColumnDef
@@ -272,20 +302,14 @@ will receive the :py:class:`OmitColumnDef` type
                 if self._inflect.singular_noun(column) is not False:
                     return NumericColumnDef
 
-                if cardinality is None or cardinality > self.INTEGER_CARDINALITY_THRESHOLD:
-                    return NumericColumnDef
-
                 return CategoricalColumnDef
             else:
-                if cardinality is None or cardinality > self.STRING_CARDINALITY_THRESHOLD:
-                    return TextColumnDef
+                # check if there are too many distinct values compared to total
+                if cardinality is None or (n_nonnull is not None and
+                                           cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
+                    if not must_have_type and self.ID_NAME_REGEX.search(column):
+                        return OmitColumnDef
 
-                if (n_nonnull is not None and
-                        cardinality / n_nonnull < self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_GUARANTEED_THRESHOLD):
-                    return CategoricalColumnDef
-
-                if (n_nonnull is not None and
-                        cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
                     return TextColumnDef
 
                 return CategoricalColumnDef
@@ -293,7 +317,10 @@ will receive the :py:class:`OmitColumnDef` type
         # no decision - omit
         return OmitColumnDef
 
-    def instantiate_column_type(self, table: str, column: str, in_primary_key: bool, cls: Type[ColumnDef]) -> ColumnDef:
+    def instantiate_column_type(self, table: str, column: str,
+                                in_primary_key: bool,
+                                col_type: TypeEngine,
+                                cls: Type[ColumnDef]) -> ColumnDef:
         """
         Instantiate the :py:class:`ColumnDef` subclass instance.
 
@@ -301,7 +328,7 @@ will receive the :py:class:`OmitColumnDef` type
         if you've overridden :py:method:`do_guess_column_type`.
         """
         if cls == CategoricalColumnDef:
-            cardinality = self.guess_categorical_cardinality(table, column)
+            cardinality = self.guess_categorical_cardinality(table, column, col_type)
             assert cardinality is not None, (f"Column {table}.{column} was determined to be categorical "
                                              "but cardinality cannot be retrieved.")
             return CategoricalColumnDef(key=in_primary_key,
@@ -348,10 +375,10 @@ will receive the :py:class:`OmitColumnDef` type
                 # Thus, we will mark this as "omit", to signify that this column should not be a feature
                 return OmitColumnDef(key=True)
 
-            # if the column is part of a foreign key constraint, return "omit" ColumnDef
+            # if the column is part of a non-composite foreign key constraint, return "omit" ColumnDef
             # instead of the actual column type, as it most likely should not be a feature
-            fks = self._get_all_foreign_key_columns(table)
-            if column in fks:
+            non_comp_fks = self._get_all_non_composite_foreign_key_columns(table)
+            if column in non_comp_fks:
                 return OmitColumnDef(key=is_in_pk)
 
         # delegate to other methods
@@ -362,7 +389,7 @@ will receive the :py:class:`OmitColumnDef` type
         if is_target and isinstance(guessed_type, OmitColumnDef):
             raise TypeError(f"Column '{column}' in table '{table}' cannot be omitted.")
 
-        return self.instantiate_column_type(table, column, in_primary_key=is_in_pk, cls=guessed_type)
+        return self.instantiate_column_type(table, column, in_primary_key=is_in_pk, col_type=col_type, cls=guessed_type)
 
     def guess_schema(self) -> Schema:
         """Locate all database tables and all columns and run :py:method:`guess_column_type` for all of them.
@@ -378,6 +405,9 @@ will receive the :py:class:`OmitColumnDef` type
                 column_defs[column_name] = self.guess_column_type(table_name, column_name)
 
             schema[table_name] = TableSchema(columns=column_defs, foreign_keys=fks)
+
+        if self._post_guess_schema_hook is not None:
+            self._post_guess_schema_hook(schema)
 
         return schema
 
