@@ -2,6 +2,10 @@ import torch
 from torch_geometric.nn import HeteroConv, Linear, GCNConv, SAGEConv
 
 from db_transformer.transformer import Embedder
+from db_transformer.data.embedder.embedders import SingleTableEmbedder, TableEmbedder
+from db_transformer.data.embedder import CatEmbedder, NumEmbedder
+from db_transformer.schema.columns import CategoricalColumnDef, NumericColumnDef
+from db_transformer.schema.schema import ColumnDef, Schema
 
 
 class DBGNNLayer(torch.nn.Module):
@@ -16,8 +20,10 @@ class DBGNNLayer(torch.nn.Module):
 
 
 class DBGNN(torch.nn.Module):
-    def __init__(self, dim, out_channels, proj_dim, layers, metadata, schema, aggr="mean"):
+    def __init__(self, dim, out_channels, proj_dim, layers, metadata, schema, column_defs, column_names, config, target_table, aggr="mean"):
         super().__init__()
+
+        self.target_table = target_table
 
         self.out_lin = Linear(proj_dim, out_channels, bias=True)
         self.out_channels = out_channels
@@ -25,7 +31,13 @@ class DBGNN(torch.nn.Module):
         self.layers = layers
 
         self.schema = schema
-        self.embedder = Embedder(dim, schema)
+        self.embedder = TableEmbedder(
+            (CategoricalColumnDef, lambda: CatEmbedder(dim=config.dim)),
+            (NumericColumnDef, lambda: NumEmbedder(dim=config.dim)),
+            dim=config.dim,
+            column_defs=column_defs,
+            column_names=column_names,
+        )
 
         self.gnn_layers = torch.nn.ModuleList([
             DBGNNLayer(proj_dim, metadata, aggr)
@@ -33,7 +45,7 @@ class DBGNN(torch.nn.Module):
         ])
 
         self.table_projection = torch.nn.ModuleDict({
-            key: torch.nn.Linear(max(len(self.embedder.get_embed_cols(key)), 1) * self.dim, proj_dim)
+            key: torch.nn.Linear(len(column_defs[target_table]) * self.dim, proj_dim)
             for key in self.schema.keys()
         })
 
@@ -41,25 +53,12 @@ class DBGNN(torch.nn.Module):
 
 
     def forward(self, x_dict, edge_index_dict):
-        new_x_dict = {}
-        for table_name, value in x_dict.items():
-            if table_name == "_target_table":
-                new_x_dict[table_name] = torch.ones((value.shape[0], self.proj_dim))
-
-            if table_name not in self.schema:
-                continue
-
-            val = self.embedder(table_name, value)
-            val = val.reshape((val.shape[0], val.shape[1] * val.shape[2]))
-
-            new_x_dict[table_name] = self.table_projection[table_name](val)
-
-        x = new_x_dict
+        x = self.embedder(x_dict)
 
         for layer in self.gnn_layers:
             x = layer(x, edge_index_dict)
 
-        x = x["_target_table"]
+        x = x[self.target_table]
         x = x[:, :]
         x = self.out_lin(x)
 

@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.nn import HeteroConv, Linear, MessagePassing
 
-from db_transformer.data.embedder import PerTypeEmbedder, NumEmbedder, CatEmbedder
+from db_transformer.data.embedder import TableEmbedder, NumEmbedder, CatEmbedder
 from db_transformer.schema import OmitColumnDef, NumericColumnDef, CategoricalColumnDef, DateColumnDef, \
     DateTimeColumnDef
 
@@ -50,18 +50,16 @@ class DBTransformerLayer(torch.nn.Module):
 
 
 class Embedder(torch.nn.Module):
-    def __init__(self, dim, schema):
+    def __init__(self, dim, schema, column_defs, column_names, config):
         super().__init__()
 
         self.schema = schema
-        self.embedder = PerTypeEmbedder(
-            {
-                OmitColumnDef: lambda: None,
-                NumericColumnDef: lambda: NumEmbedder(dim),
-                CategoricalColumnDef: lambda: CatEmbedder(dim),
-                DateColumnDef: lambda: None,
-                DateTimeColumnDef: lambda: None,
-            }
+        self.embedder = TableEmbedder(
+            (CategoricalColumnDef, lambda: CatEmbedder(dim=config.dim)),
+            (NumericColumnDef, lambda: NumEmbedder(dim=config.dim)),
+            dim=config.dim,
+            column_defs=column_defs,
+            column_names=column_names,
         )
 
         self.dim = dim
@@ -89,7 +87,7 @@ class Embedder(torch.nn.Module):
 
 
 class DBTransformer(torch.nn.Module):
-    def __init__(self, dim, out_channels, ff_dim, layers, metadata, num_heads, schema, aggr="mean"):
+    def __init__(self, dim, out_channels, ff_dim, layers, metadata, num_heads, schema, column_defs, column_names, aggr="mean"):
         super().__init__()
 
         self.out_lin = Linear(dim, out_channels, bias=True)
