@@ -197,26 +197,6 @@ class TheLightningModel(L.LightningModule):
 _T = TypeVar('_T')
 
 
-class SimpleDataset(Dataset[_T]):
-    def __init__(self, data: Union[List[_T], Tuple[_T], _T], *other_data: _T) -> None:
-        all_data = []
-
-        if isinstance(data, list) or isinstance(data, tuple):
-            all_data.extend(data)
-        else:
-            all_data.append(data)
-
-        all_data.extend(other_data)
-
-        self._data = all_data
-
-    def __len__(self):
-        return len(self._data)
-
-    def __getitem__(self, index) -> HeteroData:
-        return self._data[index]
-
-
 def build_data(
         c: Callable[[HeteroDataBuilder], _T],
         dataset=DEFAULT_DATASET_NAME,
@@ -258,10 +238,7 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
         defaults = FIT_DATASET_DEFAULTS[dataset]
 
         schema_analyzer = FITRelationalDataset.create_schema_analyzer(dataset, conn, verbose=True)
-
         schema = schema_analyzer.guess_schema()
-        if defaults.schema_fixer is not None:
-            defaults.schema_fixer(schema)
 
         data_pd, (data, column_defs, colnames) = build_data(
             lambda builder: (builder.build_as_pandas(), builder.build(with_column_names=True)),
