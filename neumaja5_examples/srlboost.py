@@ -45,7 +45,7 @@ DatasetType = Literal[
 ]
 
 
-DEFAULT_DATASET_NAME: DatasetType = 'imdb_ijs'
+DEFAULT_DATASET_NAME: DatasetType = 'NBA'
 
 
 def _sanitize_value(value) -> str:
@@ -83,9 +83,9 @@ def feature_to_fact(table_name: str, column_name: str, df: pd.DataFrame, schema:
 
     df = df[[*pk_all, column_name]]
 
-    for row in df.itertuples():
-        idx = '_'.join([str(getattr(row, pk)) for pk in pk_all])
-        val = getattr(row, column_name)
+    for _, row in df.iterrows():
+        idx = '_'.join([str(row[pk]) for pk in pk_all])
+        val = row[column_name]
 
         row_name = _sanitize_value(f"{table_name}_{idx}")
         feature_value_name = _sanitize_value(f"{fact_name}_{val}")
@@ -102,8 +102,8 @@ def target_to_fact(table_name: str, column_name: str, target_value: str, df: pd.
 
     df = df[[*pk_all, column_name]]
 
-    for row in df.itertuples():
-        idx = '_'.join([str(getattr(row, pk)) for pk in pk_all])
+    for _, row in df.iterrows():
+        idx = '_'.join([str(row[pk]) for pk in pk_all])
         row_name = _sanitize_value(f"{table_name}_{idx}")
         yield f"{fact_name}({row_name})."
 
@@ -124,9 +124,9 @@ def foreign_key_to_fact(table_name: str, fk_def: ForeignKeyDef, df: pd.DataFrame
     fact_name = get_fact_name(get_fact_def_for_foreign_key(table_name, fk_def))
     assert fact_name is not None
 
-    for row in df.itertuples():
-        idx_left = '_'.join([str(getattr(row, pk)) for pk in pk_all])
-        idx_right = '_'.join([str(getattr(row, fk)) for fk in fk_all])
+    for _, row in df.iterrows():
+        idx_left = '_'.join([str(row[pk]) for pk in pk_all])
+        idx_right = '_'.join([str(row[fk]) for fk in fk_all])
 
         row_left_name = _sanitize_value(f"{table_name}_{idx_left}")
         row_right_name = _sanitize_value(f"{fk_def.ref_table}_{idx_right}")
@@ -238,6 +238,13 @@ def build_dataset(schema: Schema, dfs: dict[str, pd.DataFrame], target: tuple[st
     test_pos.extend(target_to_fact(target[0], target[1], target_value, test_df_pos, schema))
     test_neg.extend(target_to_fact(target[0], target[1], target_value, test_df_neg, schema))
 
+    if len(train_pos) == 0 and len(test_pos) > 0:
+        train_pos = [test_pos[0]]
+    elif len(test_pos) == 0 and len(train_pos) > 0:
+        test_pos = [train_pos[0]]
+    elif len(train_pos) == 0 and len(test_pos) == 0:
+        raise ValueError(f"Literally no positive examples, what??? (target: {target_value})")
+
     train.pos = train_pos
     train.neg = train_neg
     test.pos = test_pos
@@ -296,11 +303,16 @@ def run(dataset_name: str) -> dict[str, Any]:
         n_total = data[defaults.target_table].x.shape[0]
         T.RandomNodeSplit('train_rest', num_val=int(0.30 * n_total), num_test=0)(data)
 
-    target_values = dfs[defaults.target_table][defaults.target_column].unique().tolist()
-
     target = (defaults.target_table, defaults.target_column)
     train_mask = data[defaults.target_table].train_mask.numpy()
     val_mask = data[defaults.target_table].val_mask.numpy()
+
+    # drop na values from target and from masks
+    train_mask = train_mask[~dfs[defaults.target_table][defaults.target_column].isna().to_numpy()]
+    val_mask = val_mask[~dfs[defaults.target_table][defaults.target_column].isna().to_numpy()]
+    dfs[defaults.target_table].dropna(subset=[defaults.target_column], inplace=True, ignore_index=True)
+
+    target_values = dfs[defaults.target_table][defaults.target_column].unique().tolist()
 
     train_results_per_class: collections.OrderedDict[str, np.ndarray] = collections.OrderedDict()
     test_results_per_class: collections.OrderedDict[str, np.ndarray] = collections.OrderedDict()
@@ -312,35 +324,37 @@ def run(dataset_name: str) -> dict[str, Any]:
         assert len(target_values) > 0
         target_values = target_values[:1]
 
-    for target_value in tqdm(target_values):
-        train, test = build_dataset(schema, dfs, target, target_value, train_mask, val_mask, all_values_to_idx=True)
+    with tqdm(target_values) as progress:
+        for target_value in progress:
+            progress.set_postfix(target=target_value)
+            train, test = build_dataset(schema, dfs, target, target_value, train_mask, val_mask, all_values_to_idx=True)
 
-        target_train_series = dfs[defaults.target_table][defaults.target_column][pd.Series(train_mask)]
-        train_mask_pos = target_train_series == target_value
-        order_indices_train = np.concatenate([np.where(train_mask_pos)[0], np.where(~train_mask_pos)[0]])
+            target_train_series = dfs[defaults.target_table][defaults.target_column][pd.Series(train_mask)]
+            train_mask_pos = target_train_series == target_value
+            order_indices_train = np.concatenate([np.where(train_mask_pos)[0], np.where(~train_mask_pos)[0]])
 
-        target_val_series = dfs[defaults.target_table][defaults.target_column][pd.Series(val_mask)]
-        val_mask_pos = target_val_series == target_value
-        order_indices_val = np.concatenate([np.where(val_mask_pos)[0], np.where(~val_mask_pos)[0]])
+            target_val_series = dfs[defaults.target_table][defaults.target_column][pd.Series(val_mask)]
+            val_mask_pos = target_val_series == target_value
+            order_indices_val = np.concatenate([np.where(val_mask_pos)[0], np.where(~val_mask_pos)[0]])
 
-        bk = Background(modes=train.modes)
+            bk = Background(modes=train.modes)
 
-        custom_trainer_cls = wrap_class_with_custom_file_system(BoostedRDNClassifier, dataset_name, target_value)
+            custom_trainer_cls = wrap_class_with_custom_file_system(BoostedRDNClassifier, dataset_name, target_value)
 
-        clf = custom_trainer_cls(
-            solver='SRLBoost',
-            background=bk,
-            target=get_fact_name(get_fact_def_for_target(*target, target_value, schema)),
-        )
-        clf.fit(train)
+            clf = custom_trainer_cls(
+                solver='SRLBoost',
+                background=bk,
+                target=get_fact_name(get_fact_def_for_target(*target, target_value, schema)),
+            )
+            clf.fit(train)
 
-        p = clf.predict_proba(train)
-        train_results_per_class[target_value] = p[np.argsort(order_indices_train)]
+            p = clf.predict_proba(train)
+            train_results_per_class[target_value] = p[np.argsort(order_indices_train)]
 
-        p = clf.predict_proba(test)
-        test_results_per_class[target_value] = p[np.argsort(order_indices_val)]
+            p = clf.predict_proba(test)
+            test_results_per_class[target_value] = p[np.argsort(order_indices_val)]
 
-        # pred = np.greater(p, clf.threshold_)
+            # pred = np.greater(p, clf.threshold_)
 
     if len(target_values) == 1:
         target_value = target_values[0]
