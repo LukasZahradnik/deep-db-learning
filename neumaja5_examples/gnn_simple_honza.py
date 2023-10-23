@@ -27,7 +27,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import HeteroData
 from torch_geometric.data.data import EdgeType, NodeType
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import BatchNorm, HeteroConv, SAGEConv
+from torch_geometric.nn import BatchNorm, HeteroConv, SAGEConv, Sequential
 
 lt.monkey_patch()
 
@@ -52,7 +52,7 @@ DatasetType = Literal[
 ]
 
 
-DEFAULT_DATASET_NAME: DatasetType = 'mutagenesis'
+DEFAULT_DATASET_NAME: DatasetType = 'CORA'
 
 
 AggrType = Literal['sum', 'mean', 'min', 'max', 'cat']
@@ -61,10 +61,7 @@ AggrType = Literal['sum', 'mean', 'min', 'max', 'cat']
 @dataclass
 class ModelConfig:
     dim: int = 64
-    attn: Literal['encoder', 'attn'] = 'attn'
     aggr: AggrType = 'sum'
-    gnn_sub_layers: int = 1
-    attn_sub_layers: int = 1
     gnn_layers: List[int] = field(default_factory=lambda: [])
     mlp_layers: List[int] = field(default_factory=lambda: [])
     batch_norm: bool = False
@@ -157,32 +154,31 @@ class HeteroGNN(torch.nn.Module):
 
         layers = []
         layers += [
-            HeteroGNNLayer(
+            (HeteroGNNLayer(
                 node_dims,
                 the_dims[0],
                 node_types=node_types,
                 edge_types=edge_types,
                 aggr=aggr,
-                batch_norm=batch_norm)
+                batch_norm=batch_norm), 'x, edge_index -> x'),
         ]
 
-        layers += [
-            HeteroGNNLayer(a, b,
-                           node_types=node_types,
-                           edge_types=edge_types,
-                           aggr=aggr,
-                           batch_norm=batch_norm)
-            for a, b in zip(the_dims[:-1], the_dims[1:])
-        ]
+        for a, b in zip(the_dims[:-1], the_dims[1:]):
+            layers += [
+                NodeApplied(lambda nt: torch.nn.ReLU(inplace=True), node_types=node_types),
+                (HeteroGNNLayer(a, b,
+                                node_types=node_types,
+                                edge_types=edge_types,
+                                aggr=aggr,
+                                batch_norm=batch_norm), 'x, edge_index -> x')
+            ]
 
-        self.layers = torch.nn.ModuleList(layers)
+        self.layers = Sequential('x, edge_index', layers)
 
     def forward(self,
                 x_dict: Dict[NodeType, torch.Tensor],
                 edge_index_dict: Dict[EdgeType, torch.Tensor]) -> Dict[NodeType, torch.Tensor]:
-        for layer in self.layers:
-            x_dict = layer(x_dict, edge_index_dict)
-
+        x_dict = self.layers(x_dict, edge_index_dict)
         return x_dict
 
 
@@ -234,12 +230,23 @@ class Model(torch.nn.Module):
                              )
 
         if config.mlp_layers:
-            mlp_layers = [*config.mlp_layers, out_dim]
+            mlp_layer_dims = [*config.mlp_layers, out_dim]
 
-            self.mlp = torch.nn.Sequential(*[
-                torch.nn.Linear(a, b)
-                for a, b in zip(mlp_layers[:-1], mlp_layers[1:])
-            ])
+            mlp_layers = []
+
+            for a, b in zip(mlp_layer_dims[:-1], mlp_layer_dims[1:]):
+                mlp_layers += [
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(a, b)
+                ]
+
+                if config.batch_norm:
+                    mlp_layers += [torch.nn.BatchNorm1d(b)]
+
+            if config.batch_norm:
+                del mlp_layers[-1]
+
+            self.mlp = torch.nn.Sequential(*mlp_layers)
         else:
             self.mlp = None
 
@@ -270,9 +277,6 @@ class TheLightningModel(L.LightningModule):
         self.loss_module = torch.nn.CrossEntropyLoss()
 
         self._best_train_loss = float('inf')
-        self._best_train_acc = 0.0
-        self._best_val_acc = 0.0
-        self._best_test_acc = 0.0
 
     def forward(self, data: HeteroData, mode: Literal['train', 'test', 'val']):
         out = self.model(data.collect('x'), data.collect('edge_index'))
@@ -299,55 +303,21 @@ class TheLightningModel(L.LightningModule):
         loss, acc = self.forward(batch, mode="train")
 
         self.log("train_loss", loss, batch_size=1, prog_bar=True)
-        if loss < self._best_train_loss:
-            self._best_train_loss = loss
-            self.log("best_train_loss", loss, batch_size=1, prog_bar=True)
-
         self.log("train_acc", acc, batch_size=1, prog_bar=True)
-        if acc > self._best_train_acc:
-            self._best_train_acc = acc
-            self.log("best_train_acc", acc, batch_size=1, prog_bar=True)
-
         return loss
 
     def validation_step(self, batch, batch_idx):
         _, acc = self.forward(batch, mode="val")
 
         self.log("val_acc", acc, batch_size=1, prog_bar=True)
-        if acc > self._best_val_acc:
-            self._best_val_acc = acc
-            self.log("best_val_acc", acc, batch_size=1, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         _, acc = self.forward(batch, mode="test")
 
         self.log("test_acc", acc, batch_size=1, prog_bar=True)
-        if acc > self._best_test_acc:
-            self._best_test_acc = acc
-            self.log("best_test_acc", acc, batch_size=1, prog_bar=True)
 
 
 _T = TypeVar('_T')
-
-
-class SimpleDataset(Dataset[_T]):
-    def __init__(self, data: Union[List[_T], Tuple[_T], _T], *other_data: _T) -> None:
-        all_data = []
-
-        if isinstance(data, list) or isinstance(data, tuple):
-            all_data.extend(data)
-        else:
-            all_data.append(data)
-
-        all_data.extend(other_data)
-
-        self._data = all_data
-
-    def __len__(self):
-        return len(self._data)
-
-    def __getitem__(self, index) -> HeteroData:
-        return self._data[index]
 
 
 def build_data(
@@ -383,6 +353,15 @@ def build_data(
     return out
 
 
+def _expand_with_dummy_features(data: HeteroData, column_defs: Dict[NodeType, List[ColumnDef]]):
+    for node_type in data.node_types:
+        x = data[node_type].x
+        if x.shape[-1] == 0:
+            x = torch.ones((*x.shape[:-1], 1), dtype=x.dtype)
+            column_defs[node_type] = [NumericColumnDef()]
+            data[node_type].x = x
+
+
 def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] = None, device=None):
     if data_config is None:
         data_config = DataConfig()
@@ -400,6 +379,8 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
             schema=schema,
             # device=device
         )
+
+        _expand_with_dummy_features(data, column_defs)
 
         n_total = data[defaults.target_table].x.shape[0]
         T.RandomNodeSplit('train_rest', num_val=int(0.30 * n_total), num_test=0)(data)
@@ -452,6 +433,38 @@ class TimerOrEpochsCallback(L_callbacks.Callback):
                 self.epochs *= self.epochs_multiplier
 
 
+class BestMetricsLoggerCallback(L_callbacks.Callback):
+    def __init__(self, monitor: str, cmp: Literal['min', 'max'], metrics: Optional[Dict[str, str]] = None) -> None:
+        if metrics is None:
+            metrics = {
+                'train_acc': 'best_train_acc',
+                'val_acc': 'best_val_acc',
+                'test_acc': 'best_test_acc',
+                'train_loss': 'best_train_loss',
+                'val_loss': 'best_val_loss',
+                'test_loss': 'best_test_loss',
+            }
+
+        self.monitor = monitor
+        self.cmp: Literal['min', 'max'] = cmp
+        self.metrics = metrics
+        self.last_value: Optional[float] = None
+
+    def on_train_epoch_end(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
+        if self.monitor in trainer.callback_metrics:
+            mon_value = trainer.callback_metrics[self.monitor].detach().cpu().item()
+
+            if (self.last_value is None
+                    or (self.cmp == 'min' and mon_value < self.last_value)
+                    or (self.cmp == 'max' and mon_value > self.last_value)):
+                self.last_value = mon_value
+                for metric_name, log_as in self.metrics.items():
+                    if metric_name in trainer.callback_metrics:
+                        this_value = trainer.callback_metrics[metric_name].detach().cpu().item()
+                        if metric_name in trainer.callback_metrics:
+                            pl_module.log(log_as, this_value, prog_bar=True)
+
+
 def main(
         dataset_name: str = DEFAULT_DATASET_NAME,
         data_config: Optional[DataConfig] = None,
@@ -484,6 +497,7 @@ def main(
                    L_callbacks.ModelCheckpoint('./torch-models/',
                                                filename=dataset_name + '-{epoch}-{train_acc:.3f}-{val_acc:.3f}',
                                                mode='max', monitor='val_acc'),
+                   BestMetricsLoggerCallback(monitor='val_acc', cmp='max'),
                    TimerOrEpochsCallback(epochs=epochs, min_train_time_s=min_train_time_s)],
         min_epochs=epochs,
         max_epochs=-1,

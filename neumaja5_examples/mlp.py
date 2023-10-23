@@ -136,11 +136,6 @@ class TheLightningModel(L.LightningModule):
         self.defaults = defaults
         self.loss_module = torch.nn.CrossEntropyLoss()
 
-        self._best_train_loss = float('inf')
-        self._best_train_acc = 0.0
-        self._best_val_acc = 0.0
-        self._best_test_acc = 0.0
-
     def forward(self, data: HeteroData, mode: Literal['train', 'test', 'val']):
         target_tbl = data[self.defaults.target_table]
 
@@ -166,14 +161,7 @@ class TheLightningModel(L.LightningModule):
         loss, acc = self.forward(batch, mode="train")
 
         self.log("train_loss", loss, batch_size=1, prog_bar=True)
-        if loss < self._best_train_loss:
-            self._best_train_loss = loss
-            self.log("best_train_loss", loss, batch_size=1, prog_bar=True)
-
         self.log("train_acc", acc, batch_size=1, prog_bar=True)
-        if acc > self._best_train_acc:
-            self._best_train_acc = acc
-            self.log("best_train_acc", acc, batch_size=1, prog_bar=True)
 
         return loss
 
@@ -181,40 +169,14 @@ class TheLightningModel(L.LightningModule):
         _, acc = self.forward(batch, mode="val")
 
         self.log("val_acc", acc, batch_size=1, prog_bar=True)
-        if acc > self._best_val_acc:
-            self._best_val_acc = acc
-            self.log("best_val_acc", acc, batch_size=1, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         _, acc = self.forward(batch, mode="test")
 
         self.log("test_acc", acc, batch_size=1, prog_bar=True)
-        if acc > self._best_test_acc:
-            self._best_test_acc = acc
-            self.log("best_test_acc", acc, batch_size=1, prog_bar=True)
 
 
 _T = TypeVar('_T')
-
-
-class SimpleDataset(Dataset[_T]):
-    def __init__(self, data: Union[List[_T], Tuple[_T], _T], *other_data: _T) -> None:
-        all_data = []
-
-        if isinstance(data, list) or isinstance(data, tuple):
-            all_data.extend(data)
-        else:
-            all_data.append(data)
-
-        all_data.extend(other_data)
-
-        self._data = all_data
-
-    def __len__(self):
-        return len(self._data)
-
-    def __getitem__(self, index) -> HeteroData:
-        return self._data[index]
 
 
 def build_data(
@@ -258,10 +220,7 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
         defaults = FIT_DATASET_DEFAULTS[dataset]
 
         schema_analyzer = FITRelationalDataset.create_schema_analyzer(dataset, conn, verbose=True)
-
         schema = schema_analyzer.guess_schema()
-        if defaults.schema_fixer is not None:
-            defaults.schema_fixer(schema)
 
         data_pd, (data, column_defs, colnames) = build_data(
             lambda builder: (builder.build_as_pandas(), builder.build(with_column_names=True)),
@@ -322,6 +281,38 @@ class TimerOrEpochsCallback(L_callbacks.Callback):
                 self.epochs *= self.epochs_multiplier
 
 
+class BestMetricsLoggerCallback(L_callbacks.Callback):
+    def __init__(self, monitor: str, cmp: Literal['min', 'max'], metrics: Optional[Dict[str, str]] = None) -> None:
+        if metrics is None:
+            metrics = {
+                'train_acc': 'best_train_acc',
+                'val_acc': 'best_val_acc',
+                'test_acc': 'best_test_acc',
+                'train_loss': 'best_train_loss',
+                'val_loss': 'best_val_loss',
+                'test_loss': 'best_test_loss',
+            }
+
+        self.monitor = monitor
+        self.cmp: Literal['min', 'max'] = cmp
+        self.metrics = metrics
+        self.last_value: Optional[float] = None
+
+    def on_train_epoch_end(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
+        if self.monitor in trainer.callback_metrics:
+            mon_value = trainer.callback_metrics[self.monitor].detach().cpu().item()
+
+            if (self.last_value is None
+                    or (self.cmp == 'min' and mon_value < self.last_value)
+                    or (self.cmp == 'max' and mon_value > self.last_value)):
+                self.last_value = mon_value
+                for metric_name, log_as in self.metrics.items():
+                    if metric_name in trainer.callback_metrics:
+                        this_value = trainer.callback_metrics[metric_name].detach().cpu().item()
+                        if metric_name in trainer.callback_metrics:
+                            pl_module.log(log_as, this_value, prog_bar=True)
+
+
 def main(
         dataset_name: str = DEFAULT_DATASET_NAME,
         data_config: Optional[DataConfig] = None,
@@ -354,6 +345,7 @@ def main(
                    L_callbacks.ModelCheckpoint('./torch-models/',
                                                filename=dataset_name + '-{epoch}-{train_acc:.3f}-{val_acc:.3f}',
                                                mode='max', monitor='val_acc'),
+                   BestMetricsLoggerCallback(monitor='val_acc', cmp='max'),
                    TimerOrEpochsCallback(epochs=epochs, min_train_time_s=min_train_time_s)],
         min_epochs=epochs,
         max_epochs=-1,
