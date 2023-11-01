@@ -383,7 +383,7 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
         _expand_with_dummy_features(data, column_defs)
 
         n_total = data[defaults.target_table].x.shape[0]
-        T.RandomNodeSplit('train_rest', num_val=int(0.30 * n_total), num_test=0)(data)
+        data = T.RandomNodeSplit('train_rest', num_val=int(0.30 * n_total), num_test=0)(data)
 
         return data, data_pd, schema, defaults, column_defs, colnames
 
