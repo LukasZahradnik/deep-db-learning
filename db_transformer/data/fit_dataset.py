@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Literal
 
 from sqlalchemy.engine import Connection, Engine, create_engine, make_url
 from sqlalchemy.engine.url import URL
@@ -15,7 +15,9 @@ from db_transformer.schema import Schema
 
 
 class FITRelationalDataset(DBDataset):
-    DEFAULT_CONNECTOR = "mariadb+mariadbconnector"
+    
+    SQLDialect = Literal["postgresql", "mariadb"]
+    DEFAULT_DIALECT: SQLDialect = "mariadb"
 
     def __init__(
         self,
@@ -26,10 +28,10 @@ class FITRelationalDataset(DBDataset):
         target_column: Optional[str] = None,
         schema: Optional[Schema] = None,
         verbose=True,
-        connector: str = DEFAULT_CONNECTOR,
+        dialect: SQLDialect = DEFAULT_DIALECT,
         cache_in_memory: bool = False,
     ):
-        connection_url = f"{connector}://guest:relational@relational.fit.cvut.cz:3306/{database}"
+        connection_url = self.get_url(database, dialect)
 
         if target_table is None or target_column is None:
             try:
@@ -51,17 +53,23 @@ class FITRelationalDataset(DBDataset):
                          cache_in_memory=cache_in_memory)
 
     @classmethod
-    def get_url(cls, dataset: str, connector: str = DEFAULT_CONNECTOR) -> str:
-        return f"{connector}://guest:relational@relational.fit.cvut.cz:3306/{dataset}"
+    def get_url(cls, dataset: str, dialect: SQLDialect = 'mariadb') -> str:
+        if dialect == 'mariadb':
+            connector = "mariadb+mariadbconnector"
+            port = 3306
+        elif dialect == 'postgresql':
+            connector = "postgresql+psycopg2"
+            port = 6543
+        return f"{connector}://root:password@potato.felk.cvut.cz:{port}/{dataset}"
 
     @classmethod
-    def create_remote_connection(cls, dataset: str, *, connector: str = DEFAULT_CONNECTOR):
+    def create_remote_connection(cls, dataset: str, *, dialect: SQLDialect = DEFAULT_DIALECT):
         """Create a new SQLAlchemy Connection instance to the remote database.
 
         Create a new SQLAlchemy Connection instance to the remote database.
         Don't forget to close the Connection after you are done using it!
         """
-        return Connection(create_engine(cls.get_url(dataset, connector)))
+        return Connection(create_engine(cls.get_url(dataset, dialect)))
 
     @classmethod
     def create_schema_analyzer(cls, dataset: str, connection: Connection, verbose=False, **kwargs) -> SchemaAnalyzer:
