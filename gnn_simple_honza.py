@@ -3,7 +3,7 @@ import os
 import random
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Callable, Dict, List, Literal, Mapping, Optional, Tuple, TypeVar, Union
+from typing import Callable, Dict, List, Literal, Optional, Tuple, TypeVar
 from typing import get_args as t_get_args
 
 import lightning as L
@@ -11,8 +11,16 @@ import lightning.pytorch.callbacks as L_callbacks
 import lovely_tensors as lt
 import mlflow
 import numpy as np
+
+from simple_parsing import ArgumentParser, DashVariant
+from sqlalchemy.engine import Connection
+
 import torch
 import torch_geometric.transforms as T
+from torch_geometric.data import HeteroData
+from torch_geometric.data.data import EdgeType, NodeType
+from torch_geometric.loader import DataLoader
+
 from db_transformer.data.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS, FITDatasetDefaults, TaskType
 from db_transformer.data.embedder import CatEmbedder, NumEmbedder
 from db_transformer.data.embedder.embedders import TableEmbedder
@@ -21,13 +29,9 @@ from db_transformer.data.utils import HeteroDataBuilder
 from db_transformer.helpers.timer import Timer
 from db_transformer.schema.columns import CategoricalColumnDef, NumericColumnDef
 from db_transformer.schema.schema import ColumnDef, Schema
-from simple_parsing import ArgumentParser, DashVariant
-from sqlalchemy.engine import Connection
-from torch.utils.data import Dataset
-from torch_geometric.data import HeteroData
-from torch_geometric.data.data import EdgeType, NodeType
-from torch_geometric.loader import DataLoader
-from torch_geometric.nn import BatchNorm, HeteroConv, SAGEConv, Sequential
+
+from models import HeteroGNN
+from models.layers import NodeApplied, PerFeatureNorm
 
 lt.monkey_patch()
 
@@ -68,120 +72,6 @@ class ModelConfig:
     layer_norm: bool = False
 
 
-class NodeApplied(torch.nn.Module):
-    def __init__(self,
-                 factory: Callable[[NodeType], torch.nn.Module],
-                 node_types: List[NodeType],
-                 ) -> None:
-        super().__init__()
-
-        self.node_types = node_types
-        self.items = torch.nn.ModuleDict({
-            k: factory(k)
-            for k in node_types
-        })
-
-    def forward(self, x_dict: Dict[NodeType, torch.Tensor]) -> Dict[NodeType, torch.Tensor]:
-        out_dict: Dict[NodeType, torch.Tensor] = {}
-
-        for k in self.node_types:
-            out_dict[k] = self.items[k](x_dict[k])
-
-        return out_dict
-
-
-class PerFeatureLayerNorm(torch.nn.Module):
-    def __init__(self, n_features: int, axis: int) -> None:
-        super().__init__()
-        self.norm = torch.nn.LayerNorm([n_features])
-        self.axis = axis
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = torch.transpose(x, -1, self.axis)
-        x = self.norm(x)
-        x = torch.transpose(x, -1, self.axis)
-        return x
-
-
-class HeteroGNNLayer(torch.nn.Module):
-    def __init__(self,
-                 dim: Union[Dict[NodeType, int], int],
-                 out_dim: int,
-                 node_types: List[NodeType],
-                 edge_types: List[EdgeType],
-                 aggr: AggrType,
-                 batch_norm: bool,
-                 ):
-        super().__init__()
-
-        if isinstance(dim, Mapping):
-            convs = {et: SAGEConv((dim[et[0]], dim[et[2]]), out_dim,
-                                  aggr=aggr, add_self_loops=False) for et in edge_types}
-        else:
-            convs = {et: SAGEConv(dim, out_dim,
-                                  aggr=aggr, add_self_loops=False) for et in edge_types}
-        self.hetero = HeteroConv(convs, aggr=aggr)
-        self.norm = NodeApplied(lambda nt: BatchNorm(out_dim), node_types) if batch_norm else None
-        self._in_dim = dim
-        self._out_dim = out_dim
-
-    def forward(self,
-                x_dict: Dict[NodeType, torch.Tensor],
-                edge_index_dict: Dict[EdgeType, torch.Tensor]) -> Dict[NodeType, torch.Tensor]:
-        out = self.hetero(x_dict, edge_index_dict)
-        if self.norm is not None:
-            out = self.norm(out)
-        return out
-
-    def extra_repr(self) -> str:
-        in_dim_repr = "{various}" if not isinstance(self._in_dim, int) else self._in_dim
-
-        return f"in={in_dim_repr}, out={self._out_dim}"
-
-
-class HeteroGNN(torch.nn.Module):
-    def __init__(self, dims: List[int],
-                 node_dims: Dict[NodeType, int],
-                 out_dim: int,
-                 node_types: List[NodeType],
-                 edge_types: List[EdgeType],
-                 aggr: AggrType,
-                 batch_norm: bool,
-                 ) -> None:
-        super().__init__()
-
-        the_dims = [*dims, out_dim]
-
-        layers = []
-        layers += [
-            (HeteroGNNLayer(
-                node_dims,
-                the_dims[0],
-                node_types=node_types,
-                edge_types=edge_types,
-                aggr=aggr,
-                batch_norm=batch_norm), 'x, edge_index -> x'),
-        ]
-
-        for a, b in zip(the_dims[:-1], the_dims[1:]):
-            layers += [
-                NodeApplied(lambda nt: torch.nn.ReLU(inplace=True), node_types=node_types),
-                (HeteroGNNLayer(a, b,
-                                node_types=node_types,
-                                edge_types=edge_types,
-                                aggr=aggr,
-                                batch_norm=batch_norm), 'x, edge_index -> x')
-            ]
-
-        self.layers = Sequential('x, edge_index', layers)
-
-    def forward(self,
-                x_dict: Dict[NodeType, torch.Tensor],
-                edge_index_dict: Dict[EdgeType, torch.Tensor]) -> Dict[NodeType, torch.Tensor]:
-        x_dict = self.layers(x_dict, edge_index_dict)
-        return x_dict
-
-
 class Model(torch.nn.Module):
     def __init__(self,
                  schema: Schema,
@@ -205,7 +95,7 @@ class Model(torch.nn.Module):
 
         node_dims = {k: len(cds) for k, cds in column_defs.items()}
 
-        self.layer_norm = NodeApplied(lambda nt: PerFeatureLayerNorm(node_dims[nt], axis=-2),
+        self.layer_norm = NodeApplied(lambda nt: PerFeatureNorm(node_dims[nt], axis=-2),
                                       node_types=node_types) if config.layer_norm else None
 
         assert defaults.task == TaskType.CLASSIFICATION
@@ -268,7 +158,7 @@ class Model(torch.nn.Module):
         return x
 
 
-class TheLightningModel(L.LightningModule):
+class LightningModel(L.LightningModule):
     def __init__(self, model: Model, defaults: FITDatasetDefaults, lr: float) -> None:
         super().__init__()
         self.model = model
@@ -487,7 +377,7 @@ def main(
     model = create_model(data, schema, column_defs, colnames, dataset_name, model_config, device)
     print(model)
 
-    lightning_model = TheLightningModel(model, defaults=defaults, lr=learning_rate)
+    lightning_model = LightningModel(model, defaults=defaults, lr=learning_rate)
 
     trainer = L.Trainer(
         accelerator='gpu' if cuda else 'cpu',
@@ -520,6 +410,7 @@ if __name__ == "__main__":
     parser.add_arguments(ModelConfig, dest="model_config")
     parser.add_arguments(DataConfig, dest="data_config")
     args = parser.parse_args()
+    
     model_config: ModelConfig = args.model_config
     data_config: DataConfig = args.data_config
     dataset: DatasetType = args.dataset
@@ -534,7 +425,7 @@ if __name__ == "__main__":
 
     if do_mlflow:
         os.environ['MLFLOW_TRACKING_URI'] = 'http://147.32.83.171:2222'
-        mlflow.set_experiment("deep_rl_learning NEW - neumaja5")
+        mlflow.set_experiment("deep-db-experiments-pelesjak")
         mlflow.pytorch.autolog()
 
         file_name = os.path.basename(__file__)
