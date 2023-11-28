@@ -521,6 +521,8 @@ def run_experiment(
 
     with mlflow.start_run(run_name=run_name) as run:
         client = mlflow.tracking.MlflowClient(tracking_uri)
+        
+        ray.init(num_cpus=10, num_gpus=4)
 
         analysis: tune.ExperimentAnalysis = tune.run(
             train_model,
@@ -534,14 +536,14 @@ def run_experiment(
             config={
                 "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
                 "betas": [0.9, 0.999],
-                "embed_dim": tune.choice([8, 16, 32]),
+                "embed_dim": tune.choice([16, 32]),
                 "aggr": tune.choice(["sum"]),
-                "gnn": tune.choice([[], [16], [16, 8]]),
-                "mlp": tune.choice([[8], [16], [16, 8]]),
+                "gnn": tune.choice([[], [16]]),
+                "mlp": tune.choice([[8], [16], [32]]),
                 "batch_norm": tune.choice([True]),
                 "layer_norm": tune.choice([False]),
                 "dataset": dataset,
-                "epochs": 10000,
+                "epochs": 4000,
                 "device": "cuda" if useCuda else "cpu",
                 "mlflow_config": {
                     "client": client,
