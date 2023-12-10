@@ -2,8 +2,7 @@
 
 This repository contains code accompanying the paper [A Deep Learning Blueprint for Relational Databases](https://nips.cc/virtual/2023/81289)
 
-**TL;DR:**  
-A modular neural message-passing scheme reflecting the _relational model_ for **end-to-end deep learning from databases**
+**TL;DR:** A modular message-passing scheme reflecting the _relational model_ for **end-to-end deep learning from databases**
 
 ## About
 
@@ -42,6 +41,11 @@ If you like the idea, you can cite the paper as:
 
 ### Related
 
-![PyNeuraLogic](https://raw.githubusercontent.com/LukasZahradnik/PyNeuraLogic/b6e7c757f3999742338568f25846fe47d4948455/docs/_static/readme_logo.svg)
+There is also the [**PyNeuraLogic**](https://github.com/LukasZahradnik/PyNeuraLogic) framework that allows for a more flexible [_deep relational learning_](https://medium.com/tag/deep-relational-learning) with the DB relations (and more).
+- using [differentiable relational logic](https://github.com/GustikS/NeuraLogic), it allows to skip the intermediate transformation into (hyper)graph tensors, and operate directly with the (DB) relations.
 
-There is also [PyNeuraLogic](https://github.com/LukasZahradnik/PyNeuraLogic) framework that allows for a more direct/flexible [_deep relational learning_](https://medium.com/tag/deep-relational-learning) with the DB relations (and more).
+<p align="center">
+    <a href="https://pyneuralogic.readthedocs.io/en/latest/advanced/database_deep_learning.html">
+        <img src="https://github.com/LukasZahradnik/PyNeuraLogic/blob/master/docs/_static/sql_banner.svg" alt="SQL tutorial" title="SQL tutorial"/>
+    </a>
+</p>
