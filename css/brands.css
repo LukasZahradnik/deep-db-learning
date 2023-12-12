@@ -37,7 +37,7 @@ button {
   text-align: center;
   vertical-align: middle;
   font-size: 18px;
-  width: 300px;
+  width: 320px;
   font-weight: 700;
   line-height: 20px;
   padding: 14px 12px 12px 12px;
@@ -84,6 +84,15 @@ button:hover,
 }
 .button.button-default:hover,
 .button.button-default:focus {
+  filter: brightness(90%);
+}
+
+.button.button-neurips {
+  color: #ffffff;
+  background-color: #68448b;
+}
+.button.button-neurips:hover,
+.button.button-neurips:focus {
   filter: brightness(90%);
 }
 

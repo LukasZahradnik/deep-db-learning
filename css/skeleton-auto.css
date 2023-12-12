@@ -106,7 +106,7 @@ h1 {
 }
 h1 {
   font-size: 24px;
-  line-height: 64px;
+  line-height: 32px;
   letter-spacing: 0;
 }
 
@@ -114,7 +114,7 @@ h1 {
 @media (min-width: 550px) {
   h1 {
     font-size: 48px;
-    line-height: 96px;
+    line-height: 64px;
   }
 }
 
