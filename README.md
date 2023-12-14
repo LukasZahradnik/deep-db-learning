@@ -9,7 +9,7 @@ A _modular_ message-passing scheme reflecting the _relational model_ for **end-t
 
 The system allows to easily connect to any database through a simple connection string (with [SQL Alchemy](https://www.sqlalchemy.org/)), load information from the DB (with [Pandas](https://pandas.pydata.org/)), _**automatically analyze**_ its schema structure and data columns' semantics, and efficiently load and embed the data into learnable ([torch](https://pytorch.org/)) tensor representations.
 
-The subsequent modular neural message-passing scheme operating on top of the resulting (two-level) _**multi-relational hypergraph representation**_ then builds on [Pytorch Geometric](https://pyg.org/), allowing to easily utilize any of its modules in the respective functional interfaces (_transformation, combination, aggregation_) of the _**deep relational blueprint**_:
+The subsequent modular neural message-passing scheme operating on top of the resulting (two-level) _**multi-relational hypergraph representation**_ then builds on [**Pytorch Geometric**](https://pyg.org/), allowing to easily utilize any of its modules in the respective functional interfaces (_transformation, combination, aggregation_) of the _**deep relational blueprint**_:
 
 ![schema.png](schema.png)
 
