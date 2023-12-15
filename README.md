@@ -2,7 +2,7 @@
 
 This repository contains code accompanying the paper [A Deep Learning Blueprint for Relational Databases](https://openreview.net/forum?id=b4GEmjsHAB)
 
-**TL;DR:**\
+**TL;DR:** (or [**video**](https://www.youtube.com/watch?v=1QUQogj_xmI&ab_channel=TableRepresentationLearning))\
 A _modular_ message-passing scheme reflecting the _relational model_ for **end-to-end deep learning from databases**
 
 ## About
