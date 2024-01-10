@@ -20,6 +20,7 @@ class CTUDataset(Dataset):
         self,
         dataset_name: str,
         data_dir: str = "./datasets",
+        tasks: List[type[Task]] = None,
         save_db: bool = True
     ):
         if dataset_name not in FIT_DATASET_DEFAULTS.keys():
@@ -41,9 +42,12 @@ class CTUDataset(Dataset):
             db = self.make_db(dataset_name)
             if save_db:
                 db.save(db_dir)
+                
+        if tasks == None:
+            tasks = [CTUTask]
         
         super().__init__(
-            db, pd.Timestamp.today(), pd.Timestamp.today(), [CTUTask]
+            db, pd.Timestamp.today(), pd.Timestamp.today(), tasks
         )
 
 
@@ -85,18 +89,25 @@ class CTUDataset(Dataset):
         return Database(tables)
 
 
-# class CTUTask(Task):
+class CTUTask(Task):
     
-#     def __init__(self, dataset: CTUDataset):
-#         self.defaults = FIT_DATASET_DEFAULTS[dataset.dataset_name]
-#         metrics = []
+    name = 'ctu-task'
+    
+    def __init__(self, dataset: CTUDataset):
+        self.defaults = FIT_DATASET_DEFAULTS[dataset.dataset_name]
+        metrics = []
         
-#         super().__init__(dataset, pd.Timedelta(days=0), self.defaults.target_column, metrics)
         
-#     def make_table(self, db: Database, timestamps: pd.Series[pd.Timestamp]) -> Table:
-#         target_table = db.table_dict[self.defaults.target_table]
         
-#         return 
+        super().__init__(dataset, pd.Timedelta(days=0), self.defaults.target_column, metrics)
+        
+    def make_table(self, db: Database, timestamps: "pd.Series[pd.Timestamp]") -> Table:
+        target_table = db.table_dict[self.defaults.target_table]
+        df = target_table.df[[target_table.pkey_col, self.defaults.target_column]].copy(deep=True)
+        
+        # TODO: make random splits
+        
+        return RelBenchTable(df, {target_table.pkey_col: self.defaults.target_table})
 
 
 # if __name__ == "__main__":
