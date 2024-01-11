@@ -1,8 +1,7 @@
-from typing import Callable, List, Optional, Tuple, Literal
+from typing import List, overload
 import os
 
 import pandas as pd
-import numpy as np
 
 from sqlalchemy.engine import Connection, create_engine
 from sqlalchemy.schema import MetaData, Table
@@ -79,35 +78,36 @@ class CTUDataset(Dataset):
 
         for table_name in inspector.get_tables():
             pk = inspector.get_primary_key(table_name)
+            pkey_col = list(pk)[0] if len(pk) == 1 else None
             
             fk_dict = {list(fk)[0]: fk_const.ref_table for fk, fk_const in inspector.get_foreign_keys(table_name).items() if len(fk) == 1}
             src_table = Table(table_name, remote_md)
             
             df = pd.read_sql_query(sql=select(src_table.columns), con=remote_conn.engine)
-            tables[table_name] = RelBenchTable(df=df, fkey_col_to_pkey_table=fk_dict, pkey_col=list(pk)[0])
+            tables[table_name] = RelBenchTable(df=df, fkey_col_to_pkey_table=fk_dict, pkey_col=pkey_col)
             
         return Database(tables)
+    
 
 
 class CTUTask(Task):
     
     name = 'ctu-task'
     
-    def __init__(self, dataset: CTUDataset):
+    def __init__(self, name: str, dataset: CTUDataset):
         self.defaults = FIT_DATASET_DEFAULTS[dataset.dataset_name]
         metrics = []
         
-        
-        
         super().__init__(dataset, pd.Timedelta(days=0), self.defaults.target_column, metrics)
         
-    def make_table(self, db: Database, timestamps: "pd.Series[pd.Timestamp]") -> Table:
+    def make_table(self, db: Database, timestamps: "pd.Series[pd.Timestamp]") -> RelBenchTable:
         target_table = db.table_dict[self.defaults.target_table]
         df = target_table.df[[target_table.pkey_col, self.defaults.target_column]].copy(deep=True)
         
         # TODO: make random splits
         
         return RelBenchTable(df, {target_table.pkey_col: self.defaults.target_table})
+
 
 
 # if __name__ == "__main__":
