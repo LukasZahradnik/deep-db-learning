@@ -91,6 +91,8 @@ class TableEmbedder(torch.nn.Module):
         for k in node_data:
             try:
                 out[k] = self.table_embedders[k](node_data[k])
+                if out[k].shape[1] == 0:
+                    out[k] = torch.ones((out[k].shape[0], 1, out[k].shape[2]))
             except Exception as e:
                 raise RuntimeError(f"Failed to embed table {k}") from e
 

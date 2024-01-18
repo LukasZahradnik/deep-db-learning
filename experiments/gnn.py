@@ -1,5 +1,5 @@
 import torch
-from torch_geometric.nn import HeteroConv, Linear, GCNConv, SAGEConv
+from torch_geometric.nn import HeteroConv, Linear, GCNConv, SAGEConv, GATConv, GATv2Conv
 
 from db_transformer.transformer import Embedder
 from db_transformer.data.embedder.embedders import SingleTableEmbedder, TableEmbedder
@@ -9,14 +9,28 @@ from db_transformer.schema.schema import ColumnDef, Schema
 
 
 class DBGNNLayer(torch.nn.Module):
-    def __init__(self, dim, metadata, aggr):
+    def __init__(self, dim, metadata, aggr, schema):
         super().__init__()
 
-        convs = {m: SAGEConv(-1, dim, aggr=aggr, add_self_loops=False) for m in metadata[1]}
+        self.table_projection = torch.nn.ModuleDict({
+            key: torch.nn.Sequential(
+                torch.nn.Linear(dim, dim // 2),
+                torch.nn.ReLU(),
+                torch.nn.Linear(dim // 2, dim),
+            )
+            for key in schema.keys()
+        })
+
+        convs = {m: GATv2Conv(-1, dim, aggr=aggr, add_self_loops=False) for m in metadata[1]}
         self.hetero = HeteroConv(convs, aggr=aggr)
 
     def forward(self, x_dict, edge_index_dict):
-        return self.hetero(x_dict, edge_index_dict)
+        torch.use_deterministic_algorithms(False)
+        x_dict = {k: self.table_projection[k](x) for k, x in x_dict.items()}
+        x = self.hetero(x_dict, edge_index_dict)
+
+        torch.use_deterministic_algorithms(True)
+        return x
 
 
 class DBGNN(torch.nn.Module):
@@ -53,13 +67,13 @@ class DBGNN(torch.nn.Module):
 
 
     def forward(self, x_dict, edge_index_dict):
-        x = self.embedder(x_dict)
-
+        x_dict = self.embedder(x_dict)
+        x_dict = {k: self.table_projection[k](x.view(*x.shape[:-2], -1)) for k, x in x_dict.items()}
+        
         for layer in self.gnn_layers:
-            x = layer(x, edge_index_dict)
+            x_dict = layer(x_dict, edge_index_dict)
 
-        x = x[self.target_table]
-        x = x[:, :]
+        x = x_dict[self.target_table]
         x = self.out_lin(x)
 
         return torch.softmax(x, dim=1)
