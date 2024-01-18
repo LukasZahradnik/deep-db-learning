@@ -54,12 +54,12 @@ class DBGNN(torch.nn.Module):
         )
 
         self.gnn_layers = torch.nn.ModuleList([
-            DBGNNLayer(proj_dim, metadata, aggr)
+            DBGNNLayer(proj_dim, metadata, aggr, schema)
             for _ in range(layers)
         ])
 
         self.table_projection = torch.nn.ModuleDict({
-            key: torch.nn.Linear(len(column_defs[target_table]) * self.dim, proj_dim)
+            key: torch.nn.Linear(max(len(column_defs[key]), 1) * self.dim, proj_dim)
             for key in self.schema.keys()
         })
 
