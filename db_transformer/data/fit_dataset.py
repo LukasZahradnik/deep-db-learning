@@ -55,12 +55,12 @@ class FITRelationalDataset(DBDataset):
     @classmethod
     def get_url(cls, dataset: str, dialect: SQLDialect = 'mariadb') -> str:
         if dialect == 'mariadb':
-            connector = "mariadb+mariadbconnector"
+            connector = "mariadb+mysqlconnector"
             port = 3306
         elif dialect == 'postgresql':
             connector = "postgresql+psycopg2"
             port = 6543
-        return f"{connector}://guest:potato-relational@potato.felk.cvut.cz:{port}/{dataset}"
+        return f"{connector}://guest:ctu-relational@78.128.250.186:{port}/{dataset}"
 
     @classmethod
     def create_remote_connection(cls, dataset: str, *, dialect: SQLDialect = DEFAULT_DIALECT):
