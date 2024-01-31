@@ -60,7 +60,7 @@ class FITRelationalDataset(DBDataset):
         elif dialect == 'postgresql':
             connector = "postgresql+psycopg2"
             port = 6543
-        return f"{connector}://root:password@potato.felk.cvut.cz:{port}/{dataset}"
+        return f"{connector}://guest:potato-relational@potato.felk.cvut.cz:{port}/{dataset}"
 
     @classmethod
     def create_remote_connection(cls, dataset: str, *, dialect: SQLDialect = DEFAULT_DIALECT):

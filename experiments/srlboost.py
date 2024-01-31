@@ -258,7 +258,7 @@ class CustomFileSystem(FileSystem):
         jar_root = Path(srlearn_base.__file__).parent
 
         # Allocate a location where data can safely be stored.
-        data = Path('.') / FileSystem.boostsrl_data_directory
+        data = Path('../neumaja5_examples') / FileSystem.boostsrl_data_directory
         data.mkdir(exist_ok=True)
 
         dataset_dir = data / dataset_name
