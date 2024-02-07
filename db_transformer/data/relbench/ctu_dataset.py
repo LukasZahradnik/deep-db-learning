@@ -10,10 +10,12 @@ from sqlalchemy.engine import Connection, create_engine
 from sqlalchemy.schema import MetaData, Table
 from sqlalchemy.sql import select, text
 
-from db_transformer.data.dataset_defaults.fit_dataset_defaults import (
-    FIT_DATASET_DEFAULTS,
+from db_transformer.data.relbench.ctu_repository_defauts import (
+    CTU_REPOSITORY_DEFAULTS,
     TaskType,
 )
+
+
 from db_transformer.db.db_inspector import DBInspector
 
 from relbench.data import Dataset, BaseTask, Database, Table as RelBenchTable
@@ -42,10 +44,10 @@ class CTUDataset(Dataset):
         tasks: List[type[BaseTask]] = None,
         save_db: bool = True,
     ):
-        if name not in FIT_DATASET_DEFAULTS.keys():
+        if name not in CTU_REPOSITORY_DEFAULTS.keys():
             raise KeyError(f"Relational CTU dataset '{name}' is unknown.")
 
-        self.dataset_name = name
+        self.name = name
         self.data_dir = data_dir
 
         db = None
@@ -68,6 +70,9 @@ class CTUDataset(Dataset):
 
     def validate_and_correct_db(self):
         return
+
+    def get_task(self, task_name: str, *args, **kwargs) -> BaseTask:
+        return CTUTask(dataset=self)
 
     @classmethod
     def get_url(cls, dataset: str) -> str:
@@ -120,13 +125,11 @@ class CTUTask(BaseTask):
 
     name = "ctu-task"
 
-    def __init__(self, name: str, dataset: CTUDataset):
-        self.defaults = FIT_DATASET_DEFAULTS[dataset.dataset_name]
+    def __init__(self, dataset: CTUDataset):
+        self.defaults = CTU_REPOSITORY_DEFAULTS[dataset.name]
         metrics = []
 
-        super().__init__(
-            dataset, pd.Timedelta(days=0), self.defaults.target_column, metrics
-        )
+        super().__init__(dataset, pd.Timedelta(days=0), metrics)
 
     def make_table(
         self, db: Database, timestamps: "pd.Series[pd.Timestamp]"
@@ -140,11 +143,32 @@ class CTUTask(BaseTask):
 
         return RelBenchTable(df, {target_table.pkey_col: self.defaults.target_table})
 
+    @property
+    def train_table(self) -> Table:
+        """Returns the train table for a task."""
+
+        return self.make_table(self.dataset.db, None)
+
+    @property
+    def val_table(self) -> Table:
+        r"""Returns the val table for a task."""
+
+        return self.make_table(self.dataset.db, None)
+
+    @property
+    def test_table(self) -> Table:
+        r"""Returns the test table for a task."""
+
+        return self.make_table(self.dataset.db, None)
+
 
 if __name__ == "__main__":
     import sys, os
 
     sys.path.append(os.getcwd())
 
-    dataset = CTUDataset(name="mutagenesis")
-    print(dataset.db.table_dict)
+    dataset = CTUDataset(name="Chess")
+    task = dataset.get_task("ctu-task")
+
+    print(task.train_table.df)
+    # print(dataset.db.table_dict)
