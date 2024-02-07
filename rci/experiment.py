@@ -4,21 +4,17 @@ import os
 import random
 import sys
 from datetime import datetime
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import (
-    Callable,
     Dict,
     List,
     Literal,
     Optional,
     Tuple,
     TypeVar,
-    Union,
     get_args,
 )
 
-# import lightning as L
-# import lightning.pytorch.callbacks as L_callbacks
 import lovely_tensors as lt
 
 import mlflow
@@ -28,12 +24,11 @@ from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 
 import numpy as np
 
-from simple_parsing import ArgumentParser, DashVariant
+from simple_parsing import ArgumentParser
 from sqlalchemy.engine import Connection
 
 import torch
 from torch_geometric.transforms import RandomNodeSplit
-from torch_geometric.datasets import Entities, Planetoid
 from torch_geometric.data import HeteroData
 from torch_geometric.data.data import EdgeType, NodeType
 from torch_geometric.loader import DataLoader
@@ -521,7 +516,7 @@ def run_experiment(
 
     with mlflow.start_run(run_name=run_name) as run:
         client = mlflow.tracking.MlflowClient(tracking_uri)
-        
+
         ray.init(num_cpus=10, num_gpus=4)
 
         analysis: tune.ExperimentAnalysis = tune.run(
@@ -587,4 +582,3 @@ run_experiment(
     args.cuda,
     args.run_name,
 )
-
