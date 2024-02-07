@@ -1,0 +1,95 @@
+#!/bin/bash
+
+#SBATCH --job-name=simple_model_batchmark
+#SBATCH --partition=gpu
+#SBATCH --nodes=2
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=4
+#SBATCH --time=01:00:00
+
+conda_env="deep-db-learning"
+
+nodes=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+nodes_array=($nodes)
+
+echo ${nodes[*]}
+
+node_1=${nodes_array[0]}
+ip=$(srun --nodes=1 --ntasks=1 --gres=gpu:0 -w "$node_1" hostname --ip-address)
+
+# if we detect a space character in the head node IP, we'll
+# convert it to an ipv4 address. This step is optional.
+if [[ "$ip" == *" "* ]]; then
+  IFS=' ' read -ra ADDR <<< "$ip"
+  if [[ ${#ADDR[0]} -gt 16 ]]; then
+    ip=${ADDR[1]}
+  else
+    ip=${ADDR[0]}
+  fi
+  echo "IPV6 address detected. We split the IPV4 address as $ip"
+fi
+
+# set up head node
+port=6379
+ip_head=$ip:$port
+export ip_head
+echo "IP Head: $ip_head"
+
+echo "cpus per task $SLURM_CPUS_PER_TASK"
+
+# launch head node, leaving one core unused for the main python script
+echo "STARTING HEAD at $node_1"
+srun --job-name="ray-head" --nodes=1 --ntasks=1 --gres=gpu:0 --cpus-per-task=$((SLURM_CPUS_PER_TASK-1)) -w "$node_1" --pty bash \
+    rci/conda_env.sh "$conda_env" \
+    "ray start --head --num-cpus=$((SLURM_CPUS_PER_TASK-1)) --node-ip-address=$ip --port=$port --block" &
+ray_head=$!
+sleep 10  # was sleep 30
+
+ray_workers=()
+
+worker_num=$((SLURM_JOB_NUM_NODES - 1))
+for ((i = 1; i <= worker_num; i++)); do
+ node_i=${nodes_array[$i]}
+ echo "STARTING WORKER $i at $node_i"
+  srun --job-name="ray-worker" --nodes=1 --ntasks=1 --gres=gpu:4 -w "$node_i" --pty bash \
+    rci/conda_env.sh "$conda_env" \
+    "ray start --address=$ip_head --block --num-cpus=$SLURM_CPUS_PER_TASK --num-gpus=4" &
+  ray_workers+=$!
+  sleep 5
+done
+
+# export RAY_ADDRESS, so that ray can be initialised using ray.init(), without address
+RAY_ADDRESS=$ip_head
+RAY_ADDRESS_IP=$ip
+export RAY_ADDRESS
+export RAY_ADDRESS_IP
+
+datasets=('CORA' 'world')
+
+id=$SLURM_JOBID
+
+dt=$(date '+%d-%m-%Y_%H:%M:%S');
+
+runs=()
+for dataset in "${datasets[@]}"
+do
+  python -u experiment.py --cuda --dataset=$dataset --num_samples=1 --run_name=${id}_${dataset}_${dt} &
+done
+
+wait
+# srun --nodes=1 --output=./logs/$id\_$dt/$dataset.log \
+# python -u experiment.py --cuda --dataset=$dataset --num_samples=1 --run_name=$id\_$dataset_$dt
+
+# stop the ray cluster
+for worker in "${ray_workers[@]}"
+do
+  kill $worker
+done
+kill $ray_head
+
+# srun --job-name="ray-stop" --nodes=1 --ntasks=1 --gres=gpu:0 --cpus-per-task=1 -w "$node_1" --pty bash \
+#     rci/conda_env.sh "$conda_env" \
+#     "ray stop" &
+
+wait
+

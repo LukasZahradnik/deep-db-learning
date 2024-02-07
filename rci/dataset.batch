@@ -1,0 +1,17 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:4
+#SBATCH --exclusive
+#SBATCH --mem-per-gpu=8G
+#SBATCH --cpus-per-task=16
+#SBATCH --time=00:20:00
+
+id=$1
+dataset=$2
+
+srun --output=./logs/${id}/${dataset}/run.log \
+python -u experiment.py --experiment=deep-db-experiments-pelesjak --cuda --dataset=$dataset --num_samples=8 --run_name=${id}_${dataset}
+
+
