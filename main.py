@@ -218,7 +218,7 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
         )
 
         n_total = data[defaults.target_table].x.shape[0]
-        T.RandomNodeSplit('train_rest', num_val=int(0.2 * n_total), num_test=0)(data)
+        data = T.RandomNodeSplit('train_rest', num_val=int(0.2 * n_total), num_test=0)(data)
 
         return data, data_pd, schema, defaults, column_defs, colnames
 
