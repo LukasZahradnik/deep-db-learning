@@ -1,39 +1,26 @@
-import sys, os
+import sys, os, warnings
 
 sys.path.append(os.getcwd())
 
-from typing import List, Literal
+from typing import Dict, List
 
 import pandas as pd
 
 from sqlalchemy.engine import Connection, create_engine
-from sqlalchemy.schema import MetaData, Table
+from sqlalchemy.schema import MetaData, Table as SQLTable
 from sqlalchemy.sql import select, text
-
-from db_transformer.data.relbench.ctu_repository_defauts import (
-    CTU_REPOSITORY_DEFAULTS,
-    TaskType,
-)
-
 
 from db_transformer.db.db_inspector import DBInspector
 
-from relbench.data import Dataset, BaseTask, Database, Table as RelBenchTable
+from relbench.data import Dataset, BaseTask, Database, Table
 from relbench.metrics import accuracy, average_precision, f1, mae, rmse, roc_auc
 
-# fmt: off
-CTUDatasetName = Literal[
-    'Accidents', 'Airline', 'Atherosclerosis', 'Basketball_women', 'Bupa', 
-    'Carcinogenesis', 'Chess', 'CiteSeer', 'ConsumerExpenditures', 'CORA', 
-    'CraftBeer', 'Credit', 'cs', 'Dallas', 'DCG', 'Dunur', 'Elti', 'ErgastF1',
-    'Facebook', 'financial', 'ftp', 'geneea', 'genes', 'Hepatitis_std', 'Hockey',
-    'imdb_ijs', 'imdb_MovieLens', 'KRK', 'legalActs', 'medical', 'Mondial',
-    'Mooney_Family', 'MuskSmall', 'mutagenesis', 'nations', 'NBA', 'NCAA', 'Pima', 
-    'PremierLeague', 'PTE', 'PubMed_Diabetes', 'Same_gen', 'SAP', 'SAT', 'Shakespeare', 
-    'Student_loan', 'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'trains', 'university', 'UTube',
-    'UW_std', 'VisualGenome', 'voc', 'WebKP', 'world'
-]
-# fmt: on
+from db_transformer.data.relbench.ctu_repository_defauts import (
+    CTUDatasetName,
+    CTU_REPOSITORY_DEFAULTS,
+)
+
+from db_transformer.data.relbench.ctu_task import CTUTask
 
 
 class CTUDataset(Dataset):
@@ -43,6 +30,7 @@ class CTUDataset(Dataset):
         data_dir: str = "./datasets",
         tasks: List[type[BaseTask]] = None,
         save_db: bool = True,
+        force_remake: bool = False,
     ):
         if name not in CTU_REPOSITORY_DEFAULTS.keys():
             raise KeyError(f"Relational CTU dataset '{name}' is unknown.")
@@ -53,7 +41,7 @@ class CTUDataset(Dataset):
         db = None
         db_dir = os.path.join(data_dir, name, "db")
 
-        if os.path.exists(db_dir):
+        if not force_remake and os.path.exists(db_dir):
             db = Database.load(db_dir)
             if len(db.table_dict) == 0:
                 db = None
@@ -71,7 +59,7 @@ class CTUDataset(Dataset):
     def validate_and_correct_db(self):
         return
 
-    def get_task(self, task_name: str, *args, **kwargs) -> BaseTask:
+    def get_task(self) -> BaseTask:
         return CTUTask(dataset=self)
 
     @classmethod
@@ -109,66 +97,66 @@ class CTUDataset(Dataset):
                 for fk, fk_const in inspector.get_foreign_keys(table_name).items()
                 if len(fk) == 1
             }
-            src_table = Table(table_name, remote_md)
+            src_table = SQLTable(table_name, remote_md)
+
+            dtypes: Dict[str, str] = {}
+
+            for c in src_table.columns:
+                str_type = c.type.__str__().split("(")[0]
+                dtype = MARIADB_TO_PANDAS.get(str_type, None)
+                if dtype is not None:
+                    dtypes[c.name] = dtype
+                else:
+                    warnings.warn(f"Unknown data type {c.type}")
 
             statement = select(src_table.columns)
             query = statement.compile(remote_conn.engine)
-            df = pd.read_sql_query(sql=text(query.string), con=remote_conn)
-            tables[table_name] = RelBenchTable(
+            df = pd.read_sql_query(sql=text(query.string), con=remote_conn, dtype=dtypes)
+            tables[table_name] = Table(
                 df=df, fkey_col_to_pkey_table=fk_dict, pkey_col=pkey_col
             )
 
         return Database(tables)
 
 
-class CTUTask(BaseTask):
-
-    name = "ctu-task"
-
-    def __init__(self, dataset: CTUDataset):
-        self.defaults = CTU_REPOSITORY_DEFAULTS[dataset.name]
-        metrics = []
-
-        super().__init__(dataset, pd.Timedelta(days=0), metrics)
-
-    def make_table(
-        self, db: Database, timestamps: "pd.Series[pd.Timestamp]"
-    ) -> RelBenchTable:
-        target_table = db.table_dict[self.defaults.target_table]
-        df = target_table.df[[target_table.pkey_col, self.defaults.target_column]].copy(
-            deep=True
-        )
-
-        # TODO: make random splits
-
-        return RelBenchTable(df, {target_table.pkey_col: self.defaults.target_table})
-
-    @property
-    def train_table(self) -> Table:
-        """Returns the train table for a task."""
-
-        return self.make_table(self.dataset.db, None)
-
-    @property
-    def val_table(self) -> Table:
-        r"""Returns the val table for a task."""
-
-        return self.make_table(self.dataset.db, None)
-
-    @property
-    def test_table(self) -> Table:
-        r"""Returns the test table for a task."""
-
-        return self.make_table(self.dataset.db, None)
+MARIADB_TO_PANDAS = {
+    "TINYINT": pd.Int8Dtype(),
+    "SMALLINT": pd.Int16Dtype(),
+    "MEDIUMINT": pd.Int32Dtype(),
+    "INT": pd.Int32Dtype(),
+    "INTEGER": pd.Int32Dtype(),
+    "BIGINT": pd.Int64Dtype(),
+    "TINYINT UNSIGNED": pd.UInt8Dtype(),
+    "SMALLINT UNSIGNED": pd.UInt16Dtype(),
+    "MEDIUMINT UNSIGNED": pd.UInt32Dtype(),
+    "INT UNSIGNED": pd.UInt32Dtype(),
+    "INTEGER UNSIGNED": pd.UInt32Dtype(),
+    "BIGINT UNSIGNED": pd.UInt64Dtype(),
+    "FLOAT": pd.Float32Dtype(),
+    "DOUBLE": pd.Float64Dtype(),
+    "DECIMAL": pd.Float64Dtype(),
+    "DATE": "datetime64[ns]",
+    "TIME": "object",
+    "DATETIME": "datetime64[ns]",
+    "TIMESTAMP": "datetime64[ns]",
+    "CHAR": "string",
+    "VARCHAR": "string",
+    "TEXT": "string",
+    "MEDIUMTEXT": "string",
+    "LONGTEXT": "string",
+    "ENUM": "categorical",
+    "SET": "object",
+    "BINARY": "object",
+    "VARBINARY": "object",
+    "BLOB": "object",
+    "MEDIUMBLOB": "object",
+    "LONGBLOB": "object",
+}
 
 
 if __name__ == "__main__":
-    import sys, os
-
-    sys.path.append(os.getcwd())
-
-    dataset = CTUDataset(name="Chess")
-    task = dataset.get_task("ctu-task")
+    dataset = CTUDataset(name="classicmodels", force_remake=False)
+    task = dataset.get_task()
 
     print(task.train_table.df)
     # print(dataset.db.table_dict)

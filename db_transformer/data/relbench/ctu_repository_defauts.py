@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Literal, Dict, Optional, Tuple, Union
 
 from db_transformer.db.distinct_cnt_retrieval import DBDistinctCounter
 from db_transformer.db.schema_autodetect import BuiltinDBDistinctCounter
@@ -27,7 +27,22 @@ class CTUDatasetDefault:
         return self.target_table, self.target_column
 
 
-CTU_REPOSITORY_DEFAULTS: Dict[str, CTUDatasetDefault] = {
+# fmt: off
+CTUDatasetName = Literal[
+    'Accidents', 'Airline', 'Atherosclerosis', 'Basketball_women', 'Bupa', 
+    'Carcinogenesis', 'Chess', 'CiteSeer', 'ConsumerExpenditures', 'CORA', 
+    'CraftBeer', 'Credit', 'cs', 'Dallas', 'DCG', 'Dunur', 'Elti', 'ErgastF1',
+    'Facebook', 'financial', 'ftp', 'geneea', 'genes', 'Hepatitis_std', 'Hockey',
+    'imdb_ijs', 'imdb_MovieLens', 'KRK', 'legalActs', 'medical', 'Mondial',
+    'Mooney_Family', 'MuskSmall', 'mutagenesis', 'nations', 'NBA', 'NCAA', 'Pima', 
+    'PremierLeague', 'PTE', 'PubMed_Diabetes', 'Same_gen', 'SAP', 'SAT', 'Shakespeare', 
+    'Student_loan', 'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'trains', 'university', 'UTube',
+    'UW_std', 'VisualGenome', 'voc', 'WebKP', 'world'
+]
+# fmt: on
+
+
+CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
     "Accidents": CTUDatasetDefault(
         target_table="nesreca",
         target_column="klas_nesreca",
@@ -136,7 +151,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[str, CTUDatasetDefault] = {
     ),
     "Countries": CTUDatasetDefault(
         target_table="target",
-        target_column=2012,
+        target_column="2012",
         target_id="Country Code",
         task=TaskType.REGRESSION,
     ),
