@@ -2,9 +2,7 @@ import torch
 from torch_geometric.nn import HeteroConv, Linear, MessagePassing
 
 from db_transformer.data.embedder import TableEmbedder, NumEmbedder, CatEmbedder
-from db_transformer.schema import OmitColumnDef, NumericColumnDef, CategoricalColumnDef, DateColumnDef, \
-    DateTimeColumnDef
-
+from db_transformer.schema import NumericColumnDef, CategoricalColumnDef
 
 class TransformerGNN(MessagePassing):
     def __init__(self, in_channels, ff_dim, num_heads, aggr="mean"):
@@ -55,44 +53,7 @@ class DBTransformerLayer(torch.nn.Module):
        #  x_dict = {k: self.self_attn[k](x, x, x)[0] for k, x in x_dict.items()}
 
         return self.hetero(x_dict, edge_index_dict)
-
-
-class Embedder(torch.nn.Module):
-    def __init__(self, dim, schema, column_defs, column_names, config):
-        super().__init__()
-
-        self.schema = schema
-        self.embedder = TableEmbedder(
-            (CategoricalColumnDef, lambda: CatEmbedder(dim=config.dim)),
-            (NumericColumnDef, lambda: NumEmbedder(dim=config.dim)),
-            dim=config.dim,
-            column_defs=column_defs,
-            column_names=column_names,
-        )
-
-        self.dim = dim
-        self.embedder.create(schema)
-
-    def get_embed_cols(self, table_name: str):
-        return [
-            (col_name, col)
-            for col_name, col in self.schema[table_name].columns.items()
-            if self.embedder.has(table_name, col_name, col)
-        ]
-
-    def forward(self, table_name, value):
-        embedded_cols = self.get_embed_cols(table_name)
-
-        d = [
-            self.embedder(value[:, i], table_name, col_name, col)
-            for i, (col_name, col) in enumerate(embedded_cols)
-        ]
-
-        if not d:
-            return torch.ones((value.shape[0], 1, self.dim))
-
-        return torch.stack(d, dim=1)
-
+    
 
 class DBTransformer(torch.nn.Module):
     def __init__(self, dim, out_channels, ff_dim, layers, metadata, num_heads, schema, column_defs, column_names, config, target_table, aggr="mean"):

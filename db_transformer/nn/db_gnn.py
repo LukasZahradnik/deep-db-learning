@@ -1,12 +1,9 @@
 import torch
-from torch_geometric.nn import HeteroConv, Linear, GCNConv, SAGEConv, GATConv, GATv2Conv
+from torch_geometric.nn import HeteroConv, Linear, GATv2Conv
 
-from db_transformer.transformer import Embedder
-from db_transformer.data.embedder.embedders import SingleTableEmbedder, TableEmbedder
+from db_transformer.data.embedder.embedders import TableEmbedder
 from db_transformer.data.embedder import CatEmbedder, NumEmbedder
 from db_transformer.schema.columns import CategoricalColumnDef, NumericColumnDef
-from db_transformer.schema.schema import ColumnDef, Schema
-
 
 class DBGNNLayer(torch.nn.Module):
     def __init__(self, dim, metadata, aggr, schema):

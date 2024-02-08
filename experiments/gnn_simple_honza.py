@@ -30,8 +30,8 @@ from db_transformer.helpers.timer import Timer
 from db_transformer.schema.columns import CategoricalColumnDef, NumericColumnDef
 from db_transformer.schema.schema import ColumnDef, Schema
 
-from models import HeteroGNN
-from models.layers import NodeApplied, PerFeatureNorm
+from db_transformer.nn import HeteroGNN
+from db_transformer.nn.layers import NodeApplied, PerFeatureNorm
 
 lt.monkey_patch()
 

@@ -1,7 +1,7 @@
 import torch
-from torch_geometric.nn import HeteroConv, Linear, GCNConv, SAGEConv
+from torch_geometric.nn import HeteroConv, Linear, SAGEConv
 
-from db_transformer.transformer import Embedder
+from db_transformer.nn.embedder import Embedder
 
 
 class AttnDBGNNLayer(torch.nn.Module):
