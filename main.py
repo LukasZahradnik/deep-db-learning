@@ -218,7 +218,7 @@ def create_data(dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] 
         )
 
         n_total = data[defaults.target_table].x.shape[0]
-        T.RandomNodeSplit('train_rest', num_val=int(0.2 * n_total), num_test=0)(data)
+        data = T.RandomNodeSplit('train_rest', num_val=int(0.2 * n_total), num_test=0)(data)
 
         return data, data_pd, schema, defaults, column_defs, colnames
 
@@ -231,8 +231,8 @@ def create_model(
         dataset_name=DEFAULT_DATASET_NAME,
         model_config: Optional[ModelConfig] = None,
         device=None):
-    from experiment import DBGNN
-    from db_transformer.transformer import DBTransformer
+    from db_transformer.nn.db_gnn import DBGNN
+    from db_transformer.nn.transformer import DBTransformer
 
     if model_config is None:
         model_config = ModelConfig()
