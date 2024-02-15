@@ -494,24 +494,3 @@ will receive the :py:class:`OmitColumnDef` type
             self._post_guess_schema_hook(schema)
 
         return schema
-
-
-if __name__ == "__main__":
-    import json
-
-    from sqlalchemy import create_engine
-
-    from db_transformer.helpers.objectpickle import serialize
-
-    dataset = "mutagenesis"
-
-    engine = create_engine(
-        f"mariadb+mariadbconnector://guest:relational@relational.fit.cvut.cz:3306/{dataset}"
-    )
-    with engine.connect() as connection:
-        schema = SchemaAnalyzer(connection, verbose=True).guess_schema()
-
-    print(schema)
-
-    with open(f"dataset/{dataset}.json", "w") as fp:
-        json.dump(serialize(schema), fp, indent=3)

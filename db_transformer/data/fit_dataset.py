@@ -92,11 +92,3 @@ class FITRelationalDataset(DBDataset):
     @classmethod
     def get_target(cls, dataset: str) -> Tuple[str, str]:
         return FIT_DATASET_DEFAULTS[dataset].target
-
-
-if __name__ == "__main__":
-    test_dataset = FITRelationalDataset("mutagenesis", ".", strategy=BFSStrategy(1))
-    # test_dataset = FITRelationalDataset('mutagenesis', target_table=None, root='.', strategy=BFSStrategy(18), dim=32)
-    print(test_dataset.schema)
-    print(test_dataset.len())
-    print(test_dataset.get(6))
