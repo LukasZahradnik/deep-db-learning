@@ -3,12 +3,13 @@ from collections.abc import Mapping
 from typing import Dict, Generic, Optional, TypeVar, Union
 
 
-_Value = TypeVar('_Value')
+_Value = TypeVar("_Value")
 
 __all__ = [
-    'DotDict',
-    'OrderedDotDict',
+    "DotDict",
+    "OrderedDotDict",
 ]
+
 
 class DotDict(Generic[_Value], Mapping[str, _Value]):
     """
@@ -21,10 +22,15 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
 
     def __new__(cls, *kargs, **kwargs):
         out = object.__new__(cls)
-        object.__setattr__(out, '_DotDict__data', {})
+        object.__setattr__(out, "_DotDict__data", {})
         return out
 
-    def __init__(self, __items: Optional[Union['DotDict[_Value]', Dict[str, _Value]]] = None, /, **kwargs: _Value):
+    def __init__(
+        self,
+        __items: Optional[Union["DotDict[_Value]", Dict[str, _Value]]] = None,
+        /,
+        **kwargs: _Value,
+    ):
         self.__data: Dict[str, _Value]
         self.update(__items, **kwargs)
 
@@ -35,7 +41,12 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
         for k, v in state.items():
             self[k] = v
 
-    def update(self, __items: Optional[Union['DotDict[_Value]', Dict[str, _Value]]] = None, /, **kwargs: _Value):
+    def update(
+        self,
+        __items: Optional[Union["DotDict[_Value]", Dict[str, _Value]]] = None,
+        /,
+        **kwargs: _Value,
+    ):
         ndata = {}
         if isinstance(__items, DotDict):
             ndata.update(__items.__data)
@@ -81,13 +92,13 @@ class DotDict(Generic[_Value], Mapping[str, _Value]):
         return self.__data.__iter__()
 
     def __repr__(self) -> str:
-        out_inner = ',\n'.join((f"{k} = {v}" for k, v in self.items()))
-        out_inner = '\n'.join(['    ' + line for line in out_inner.splitlines()])
+        out_inner = ",\n".join((f"{k} = {v}" for k, v in self.items()))
+        out_inner = "\n".join(["    " + line for line in out_inner.splitlines()])
 
-        out = self.__class__.__name__ + '('
+        out = self.__class__.__name__ + "("
         if out_inner:
-            out += '\n' + out_inner + '\n'
-        out += ')'
+            out += "\n" + out_inner + "\n"
+        out += ")"
 
         return out
 
@@ -106,5 +117,5 @@ class OrderedDotDict(Generic[_Value], DotDict[_Value]):
 
     def __new__(cls, *kargs, **kwargs):
         out = object.__new__(cls)
-        object.__setattr__(out, '_DotDict__data', OrderedDict())
+        object.__setattr__(out, "_DotDict__data", OrderedDict())
         return out

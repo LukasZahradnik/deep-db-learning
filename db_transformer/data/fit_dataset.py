@@ -7,7 +7,10 @@ from torch_geometric.data.dataset import Union
 
 from db_transformer.data.convertor.schema_convertor import SchemaConvertor
 from db_transformer.data.dataset import DBDataset
-from db_transformer.data.dataset_defaults.fit_dataset_defaults import FIT_DATASET_DEFAULTS, TaskType
+from db_transformer.data.dataset_defaults.fit_dataset_defaults import (
+    FIT_DATASET_DEFAULTS,
+    TaskType,
+)
 from db_transformer.data.strategy.bfs import BFSStrategy
 from db_transformer.data.strategy.strategy import BaseStrategy
 from db_transformer.db.schema_autodetect import SchemaAnalyzer
@@ -15,7 +18,7 @@ from db_transformer.schema import Schema
 
 
 class FITRelationalDataset(DBDataset):
-    
+
     SQLDialect = Literal["postgresql", "mariadb"]
     DEFAULT_DIALECT: SQLDialect = "mariadb"
 
@@ -38,32 +41,38 @@ class FITRelationalDataset(DBDataset):
                 target_table = FIT_DATASET_DEFAULTS[database].target_table
                 target_column = FIT_DATASET_DEFAULTS[database].target_column
             except KeyError:
-                raise KeyError(f"Relational FIT database '{database}' is unknown. "
-                               "Please specify target_table and target_column explicitly.")
+                raise KeyError(
+                    f"Relational FIT database '{database}' is unknown. "
+                    "Please specify target_table and target_column explicitly."
+                )
 
-        super().__init__(database=database,
-                         target_table=target_table,
-                         target_column=target_column,
-                         connection_url=connection_url,
-                         root=root,
-                         strategy=strategy,
-                         download=True,
-                         verbose=verbose,
-                         schema=schema,
-                         cache_in_memory=cache_in_memory)
+        super().__init__(
+            database=database,
+            target_table=target_table,
+            target_column=target_column,
+            connection_url=connection_url,
+            root=root,
+            strategy=strategy,
+            download=True,
+            verbose=verbose,
+            schema=schema,
+            cache_in_memory=cache_in_memory,
+        )
 
     @classmethod
-    def get_url(cls, dataset: str, dialect: SQLDialect = 'mariadb') -> str:
-        if dialect == 'mariadb':
+    def get_url(cls, dataset: str, dialect: SQLDialect = "mariadb") -> str:
+        if dialect == "mariadb":
             connector = "mariadb+mysqlconnector"
             port = 3306
-        elif dialect == 'postgresql':
+        elif dialect == "postgresql":
             connector = "postgresql+psycopg2"
             port = 6543
         return f"{connector}://guest:ctu-relational@78.128.250.186:{port}/{dataset}"
 
     @classmethod
-    def create_remote_connection(cls, dataset: str, *, dialect: SQLDialect = DEFAULT_DIALECT):
+    def create_remote_connection(
+        cls, dataset: str, *, dialect: SQLDialect = DEFAULT_DIALECT
+    ):
         """Create a new SQLAlchemy Connection instance to the remote database.
 
         Create a new SQLAlchemy Connection instance to the remote database.
@@ -72,9 +81,13 @@ class FITRelationalDataset(DBDataset):
         return Connection(create_engine(cls.get_url(dataset, dialect)))
 
     @classmethod
-    def create_schema_analyzer(cls, dataset: str, connection: Connection, verbose=False, **kwargs) -> SchemaAnalyzer:
+    def create_schema_analyzer(
+        cls, dataset: str, connection: Connection, verbose=False, **kwargs
+    ) -> SchemaAnalyzer:
         defaults = FIT_DATASET_DEFAULTS[dataset]
-        target_type = 'categorical' if defaults.task == TaskType.CLASSIFICATION else 'numeric'
+        target_type = (
+            "categorical" if defaults.task == TaskType.CLASSIFICATION else "numeric"
+        )
         return SchemaAnalyzer(
             connection,
             target=defaults.target,

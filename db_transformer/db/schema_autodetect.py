@@ -1,7 +1,18 @@
 import re
 import warnings
 from functools import lru_cache
-from typing import Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 from typing import get_args as t_get_args
 
 import inflect
@@ -57,43 +68,56 @@ from db_transformer.schema import (
     TimeColumnDef,
 )
 
-__all__ = [
-    "SchemaAnalyzer"
-]
+__all__ = ["SchemaAnalyzer"]
 
 
-TargetType = Literal['categorical', 'numeric']
+TargetType = Literal["categorical", "numeric"]
 
 BuiltinDBDistinctCounter = Literal[
-    'db_distinct',
-    'fetchall_noop',
-    'fetchall_rstrip', 'fetchall_strip', 'fetchall_unidecode', 'fetchall_ci',
-    'fetchall_rstrip_ci', 'fetchall_strip_ci', 'fetchall_unidecode_ci',
-    'fetchall_unidecode_rstrip', 'fetchall_unidecode_strip',
-    'fetchall_unidecode_rstrip_ci', 'fetchall_unidecode_strip_ci',
+    "db_distinct",
+    "fetchall_noop",
+    "fetchall_rstrip",
+    "fetchall_strip",
+    "fetchall_unidecode",
+    "fetchall_ci",
+    "fetchall_rstrip_ci",
+    "fetchall_strip_ci",
+    "fetchall_unidecode_ci",
+    "fetchall_unidecode_rstrip",
+    "fetchall_unidecode_strip",
+    "fetchall_unidecode_rstrip_ci",
+    "fetchall_unidecode_strip_ci",
 ]
 
 
-def _get_db_distinct_counter(cnt: Union[DBDistinctCounter, BuiltinDBDistinctCounter],
-                            force_collation: Optional[str] = None) -> DBDistinctCounter:
+def _get_db_distinct_counter(
+    cnt: Union[DBDistinctCounter, BuiltinDBDistinctCounter],
+    force_collation: Optional[str] = None,
+) -> DBDistinctCounter:
     if isinstance(cnt, str):
         if cnt not in t_get_args(BuiltinDBDistinctCounter):
-            raise ValueError(f"Unknown DBDistinctCounter '{cnt}'. "
-                             f"Must be a lambda or one of: {t_get_args(BuiltinDBDistinctCounter)}.")
+            raise ValueError(
+                f"Unknown DBDistinctCounter '{cnt}'. "
+                f"Must be a lambda or one of: {t_get_args(BuiltinDBDistinctCounter)}."
+            )
 
-        if cnt == 'db_distinct':
+        if cnt == "db_distinct":
             return SimpleDBDistinctCounter(force_collation=force_collation)
 
-        assert cnt.startswith('fetchall_')
-        mapper: SimpleStringSeriesMapper = cnt[len('fetchall_'):]
+        assert cnt.startswith("fetchall_")
+        mapper: SimpleStringSeriesMapper = cnt[len("fetchall_") :]
 
         if force_collation is not None:
-            raise ValueError("You can only use the 'force_collation' parameter with 'db_distinct' DBDistinctCounter.")
+            raise ValueError(
+                "You can only use the 'force_collation' parameter with 'db_distinct' DBDistinctCounter."
+            )
 
         return DBFullDataFetchLocalDistinctCounter(mapper)
     else:
         if force_collation is not None:
-            raise ValueError("You can only use the 'force_collation' parameter with 'db_distinct' DBDistinctCounter.")
+            raise ValueError(
+                "You can only use the 'force_collation' parameter with 'db_distinct' DBDistinctCounter."
+            )
 
         return cnt
 
@@ -110,23 +134,30 @@ class SchemaAnalyzer:
     """
 
     DETERMINED_TYPES: Dict[Type[ColumnDef], Tuple[Type[TypeEngine], ...]] = {
-        TextColumnDef: (LONGTEXT, MEDIUMTEXT, Unicode, ),
-        CategoricalColumnDef: (Boolean, ),
-        NumericColumnDef: (Numeric, ),
-        DateColumnDef: (Date, ),
-        DateTimeColumnDef: (DateTime, ),
-        DurationColumnDef: (Interval, ),
-        TimeColumnDef: (Time, ),
+        TextColumnDef: (
+            LONGTEXT,
+            MEDIUMTEXT,
+            Unicode,
+        ),
+        CategoricalColumnDef: (Boolean,),
+        NumericColumnDef: (Numeric,),
+        DateColumnDef: (Date,),
+        DateTimeColumnDef: (DateTime,),
+        DurationColumnDef: (Interval,),
+        TimeColumnDef: (Time,),
     }
     """
     Per each ColumnDef, set of SQL types that are automatically matched to given ColumnDef.
     """
 
     ID_NAME_REGEX = re.compile(
-        r"_id$|^id_|_id_|Id$|Id[^a-z]|[Ii]dentifier|IDENTIFIER|ID[^a-zA-Z]|ID$|[guGU]uid[^a-z]|[guGU]uid$|[GU]UID[^a-zA-Z]|[GU]UID$")
+        r"_id$|^id_|_id_|Id$|Id[^a-z]|[Ii]dentifier|IDENTIFIER|ID[^a-zA-Z]|ID$|[guGU]uid[^a-z]|[guGU]uid$|[GU]UID[^a-zA-Z]|[GU]UID$"
+    )
 
     COMMON_NUMERIC_COLUMN_NAME_REGEX = re.compile(
-        r"balance|amount|size|duration|frequency|count|cnt|votes|score|number|age|year|month|day", re.IGNORECASE)  # TODO: add more?
+        r"balance|amount|size|duration|frequency|count|cnt|votes|score|number|age|year|month|day",
+        re.IGNORECASE,
+    )  # TODO: add more?
 
     FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_GUARANTEED_THRESHOLD = 0.05
     """
@@ -142,17 +173,24 @@ class SchemaAnalyzer:
     If the fraction exceeds this threshold, marks the column as something other than categorical.
     """
 
-    def __init__(self,
-                 connection: Union[Connection, DBInspector, DBInspectorInterface],
-                 omit_filters: Union[SetFilterProtocol[Tuple[str, str]],
-                                     Iterable[Tuple[str, str]], Tuple[str, str], None] = None,
-                 target: Optional[Tuple[str, str]] = None,
-                 target_type: Optional[TargetType] = None,
-                 db_distinct_counter: Union[DBDistinctCounter, BuiltinDBDistinctCounter] = 'db_distinct',
-                 force_collation: Optional[str] = None,
-                 post_guess_schema_hook: Optional[Callable[[Schema], None]] = None,
-                 verbose=False,
-                 ) -> None:
+    def __init__(
+        self,
+        connection: Union[Connection, DBInspector, DBInspectorInterface],
+        omit_filters: Union[
+            SetFilterProtocol[Tuple[str, str]],
+            Iterable[Tuple[str, str]],
+            Tuple[str, str],
+            None,
+        ] = None,
+        target: Optional[Tuple[str, str]] = None,
+        target_type: Optional[TargetType] = None,
+        db_distinct_counter: Union[
+            DBDistinctCounter, BuiltinDBDistinctCounter
+        ] = "db_distinct",
+        force_collation: Optional[str] = None,
+        post_guess_schema_hook: Optional[Callable[[Schema], None]] = None,
+        verbose=False,
+    ) -> None:
         """Construct the SchemaAnalyzer.
 
         :field connection: The database connection - instance of SQLAlchemny's `Connection` class, \
@@ -178,13 +216,16 @@ will receive the :py:class:`OmitColumnDef` type
         else:
             raise TypeError(
                 f"database is neither {Connection.__name__}, nor "
-                f"an implementation of {DBInspectorInterface.__name__}: {connection}")
+                f"an implementation of {DBInspectorInterface.__name__}: {connection}"
+            )
 
         self._inspector = inspector
 
         self._target = target
         self._target_type: Optional[TargetType] = target_type
-        self._db_distinct_counter = _get_db_distinct_counter(db_distinct_counter, force_collation)
+        self._db_distinct_counter = _get_db_distinct_counter(
+            db_distinct_counter, force_collation
+        )
         self._force_collation = force_collation
         self._post_guess_schema_hook = post_guess_schema_hook
 
@@ -226,7 +267,9 @@ will receive the :py:class:`OmitColumnDef` type
         return out
 
     @lru_cache(maxsize=None)
-    def guess_categorical_cardinality(self, table_name: str, column_name: str, col_type: TypeEngine) -> Optional[int]:
+    def guess_categorical_cardinality(
+        self, table_name: str, column_name: str, col_type: TypeEngine
+    ) -> Optional[int]:
         """Query the DB for the total number of distinct values present in a column.
 
         Equivalent to something like `SELECT count(*) FROM (SELECT DISTINCT [column] FROM [table])`.
@@ -234,7 +277,9 @@ will receive the :py:class:`OmitColumnDef` type
         Caches its outputs using `@lru_cache`.
         """
         try:
-            return self._db_distinct_counter(self.connection, table_name, column_name, col_type)
+            return self._db_distinct_counter(
+                self.connection, table_name, column_name, col_type
+            )
         except OperationalError as e:
             if self._verbose:
                 warnings.warn(str(e))
@@ -258,8 +303,14 @@ will receive the :py:class:`OmitColumnDef` type
                 warnings.warn(str(e))
             return None
 
-    def do_guess_column_type(self, table: str, column: str,
-                             in_primary_key: bool, must_have_type: bool, col_type: TypeEngine) -> Type[ColumnDef]:
+    def do_guess_column_type(
+        self,
+        table: str,
+        column: str,
+        in_primary_key: bool,
+        must_have_type: bool,
+        col_type: TypeEngine,
+    ) -> Type[ColumnDef]:
         """
         Determine the :py:class:`ColumnDef` subclass to use with the given table column.
 
@@ -278,8 +329,10 @@ will receive the :py:class:`OmitColumnDef` type
         n_nonnull = self.query_no_nonnull(table, column)
         if n_nonnull == 0:
             if must_have_type:
-                raise ValueError(f"Column {column} in table {table} contains only NULL values, "
-                                 "but it cannot be omitted as it is the target.")
+                raise ValueError(
+                    f"Column {column} in table {table} contains only NULL values, "
+                    "but it cannot be omitted as it is the target."
+                )
             return OmitColumnDef
 
         if isinstance(col_type, (Integer, String, Text, TEXT)):
@@ -287,8 +340,11 @@ will receive the :py:class:`OmitColumnDef` type
 
             if isinstance(col_type, Integer):
                 # check if there are too many distinct values compared to total
-                if cardinality is None or (n_nonnull is not None and
-                                           cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
+                if cardinality is None or (
+                    n_nonnull is not None
+                    and cardinality / n_nonnull
+                    > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD
+                ):
                     if not must_have_type and self.ID_NAME_REGEX.search(column):
                         return OmitColumnDef
 
@@ -305,8 +361,11 @@ will receive the :py:class:`OmitColumnDef` type
                 return CategoricalColumnDef
             else:
                 # check if there are too many distinct values compared to total
-                if cardinality is None or (n_nonnull is not None and
-                                           cardinality / n_nonnull > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD):
+                if cardinality is None or (
+                    n_nonnull is not None
+                    and cardinality / n_nonnull
+                    > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD
+                ):
                     if not must_have_type and self.ID_NAME_REGEX.search(column):
                         return OmitColumnDef
 
@@ -317,10 +376,14 @@ will receive the :py:class:`OmitColumnDef` type
         # no decision - omit
         return OmitColumnDef
 
-    def instantiate_column_type(self, table: str, column: str,
-                                in_primary_key: bool,
-                                col_type: TypeEngine,
-                                cls: Type[ColumnDef]) -> ColumnDef:
+    def instantiate_column_type(
+        self,
+        table: str,
+        column: str,
+        in_primary_key: bool,
+        col_type: TypeEngine,
+        cls: Type[ColumnDef],
+    ) -> ColumnDef:
         """
         Instantiate the :py:class:`ColumnDef` subclass instance.
 
@@ -329,16 +392,26 @@ will receive the :py:class:`OmitColumnDef` type
         """
         if cls == CategoricalColumnDef:
             cardinality = self.guess_categorical_cardinality(table, column, col_type)
-            assert cardinality is not None, (f"Column {table}.{column} was determined to be categorical "
-                                             "but cardinality cannot be retrieved.")
-            return CategoricalColumnDef(key=in_primary_key,
-                                        card=cardinality)
+            assert cardinality is not None, (
+                f"Column {table}.{column} was determined to be categorical "
+                "but cardinality cannot be retrieved."
+            )
+            return CategoricalColumnDef(key=in_primary_key, card=cardinality)
 
-        if cls in {NumericColumnDef, DateColumnDef, DateTimeColumnDef,
-                   DurationColumnDef, TimeColumnDef, OmitColumnDef, TextColumnDef}:
+        if cls in {
+            NumericColumnDef,
+            DateColumnDef,
+            DateTimeColumnDef,
+            DurationColumnDef,
+            TimeColumnDef,
+            OmitColumnDef,
+            TextColumnDef,
+        }:
             return cls(key=in_primary_key)
 
-        raise TypeError(f"No logic for instantiating {cls.__name__} has been provided to {SchemaAnalyzer.__name__}.")
+        raise TypeError(
+            f"No logic for instantiating {cls.__name__} has been provided to {SchemaAnalyzer.__name__}."
+        )
 
     def guess_column_type(self, table: str, column: str) -> ColumnDef:
         """Run :py:method:`do_guess_column_type` as well as :py:method:`instantiate_column_type` together.
@@ -359,9 +432,9 @@ will receive the :py:class:`OmitColumnDef` type
 
         guessed_type: Optional[Type[ColumnDef]] = None
         if is_target and self._target_type is not None:
-            if self._target_type == 'categorical':
+            if self._target_type == "categorical":
                 guessed_type = CategoricalColumnDef
-            elif self._target_type == 'numeric':
+            elif self._target_type == "numeric":
                 guessed_type = NumericColumnDef
             else:
                 raise ValueError()
@@ -384,12 +457,19 @@ will receive the :py:class:`OmitColumnDef` type
         # delegate to other methods
         if guessed_type is None:
             guessed_type = self.do_guess_column_type(
-                table, column, in_primary_key=is_in_pk, must_have_type=is_target, col_type=col_type)
+                table,
+                column,
+                in_primary_key=is_in_pk,
+                must_have_type=is_target,
+                col_type=col_type,
+            )
 
         if is_target and isinstance(guessed_type, OmitColumnDef):
             raise TypeError(f"Column '{column}' in table '{table}' cannot be omitted.")
 
-        return self.instantiate_column_type(table, column, in_primary_key=is_in_pk, col_type=col_type, cls=guessed_type)
+        return self.instantiate_column_type(
+            table, column, in_primary_key=is_in_pk, col_type=col_type, cls=guessed_type
+        )
 
     def guess_schema(self) -> Schema:
         """Locate all database tables and all columns and run :py:method:`guess_column_type` for all of them.
@@ -398,9 +478,13 @@ will receive the :py:class:`OmitColumnDef` type
         """
         schema = Schema()
 
-        for table_name in wrap_progress(self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"):
+        for table_name in wrap_progress(
+            self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"
+        ):
             column_defs = ColumnDefs()
-            fks: List[ForeignKeyDef] = list(self.db_inspector.get_foreign_keys(table_name).values())
+            fks: List[ForeignKeyDef] = list(
+                self.db_inspector.get_foreign_keys(table_name).values()
+            )
             for column_name in self.db_inspector.get_columns(table_name):
                 column_defs[column_name] = self.guess_column_type(table_name, column_name)
 
@@ -421,11 +505,13 @@ if __name__ == "__main__":
 
     dataset = "mutagenesis"
 
-    engine = create_engine(f"mariadb+mariadbconnector://guest:relational@relational.fit.cvut.cz:3306/{dataset}")
+    engine = create_engine(
+        f"mariadb+mariadbconnector://guest:relational@relational.fit.cvut.cz:3306/{dataset}"
+    )
     with engine.connect() as connection:
         schema = SchemaAnalyzer(connection, verbose=True).guess_schema()
 
     print(schema)
 
-    with open(f'dataset/{dataset}.json', 'w') as fp:
+    with open(f"dataset/{dataset}.json", "w") as fp:
         json.dump(serialize(schema), fp, indent=3)

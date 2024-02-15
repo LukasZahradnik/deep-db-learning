@@ -31,7 +31,10 @@ def copy_database(src_inspector: DBInspector, dst: Connection, verbose=False):
 
             columns += [
                 ForeignKeyConstraint(
-                    columns=fk_def.columns, refcolumns=[fk_def.ref_table + '.' + c for c in fk_def.ref_columns], use_alter=True)
+                    columns=fk_def.columns,
+                    refcolumns=[fk_def.ref_table + "." + c for c in fk_def.ref_columns],
+                    use_alter=True,
+                )
                 for fk_def in src_inspector.get_foreign_keys(table_name).values()
             ]
 
@@ -39,10 +42,16 @@ def copy_database(src_inspector: DBInspector, dst: Connection, verbose=False):
 
         dst_metadata.create_all(dst.engine, tables=create_tables)
 
-        for table_name, dst_table in wrap_progress(zip(tables, create_tables), verbose=verbose, desc="Tables", total=len(tables)):
+        for table_name, dst_table in wrap_progress(
+            zip(tables, create_tables), verbose=verbose, desc="Tables", total=len(tables)
+        ):
             # TODO: Insert/Select in batch
             select_query = select(dst_table.columns)
-            for res in wrap_progress(src_inspector.connection.execute(select_query).all(), verbose=verbose, desc="Rows"):
+            for res in wrap_progress(
+                src_inspector.connection.execute(select_query).all(),
+                verbose=verbose,
+                desc="Rows",
+            ):
                 dst.execute(dst_table.insert().values(res))
 
 

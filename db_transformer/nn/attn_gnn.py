@@ -8,11 +8,14 @@ class AttnDBGNNLayer(torch.nn.Module):
     def __init__(self, dim, metadata, aggr, device):
         super().__init__()
 
-        convs = {m: SAGEConv(-1, dim, aggr=aggr, add_self_loops=False, device=device) for m in metadata[1]}
+        convs = {
+            m: SAGEConv(-1, dim, aggr=aggr, add_self_loops=False, device=device)
+            for m in metadata[1]
+        }
 
-        self.attns = torch.nn.ModuleDict({
-            m: torch.nn.MultiheadAttention(dim, 1, device=device) for m in metadata[0]
-        })
+        self.attns = torch.nn.ModuleDict(
+            {m: torch.nn.MultiheadAttention(dim, 1, device=device) for m in metadata[0]}
+        )
 
         self.hetero = HeteroConv(convs, aggr=aggr)
 
@@ -33,12 +36,24 @@ class AttnDBGNNLayer(torch.nn.Module):
             if len(x_dict[m].shape) == 2:
                 new_dict[m] = xs[m]
             else:
-                new_dict[m] = torch.concat((xs[m].unsqueeze(dim=1), x_dict[m][:, 1:]), dim=1)
+                new_dict[m] = torch.concat(
+                    (xs[m].unsqueeze(dim=1), x_dict[m][:, 1:]), dim=1
+                )
         return new_dict
 
 
 class AttnDBGNN(torch.nn.Module):
-    def __init__(self, dim, out_channels, proj_dim, layers, metadata, schema, aggr="mean", device=None):
+    def __init__(
+        self,
+        dim,
+        out_channels,
+        proj_dim,
+        layers,
+        metadata,
+        schema,
+        aggr="mean",
+        device=None,
+    ):
         super().__init__()
 
         self.out_lin = Linear(proj_dim, out_channels, bias=True)
@@ -49,10 +64,9 @@ class AttnDBGNN(torch.nn.Module):
         self.schema = schema
         self.embedder = Embedder(dim, schema, device=device)
 
-        self.gnn_layers = torch.nn.ModuleList([
-            AttnDBGNNLayer(proj_dim, metadata, aggr, device=device)
-            for _ in range(layers)
-        ])
+        self.gnn_layers = torch.nn.ModuleList(
+            [AttnDBGNNLayer(proj_dim, metadata, aggr, device=device) for _ in range(layers)]
+        )
 
         # self.table_projection = torch.nn.ModuleDict({
         #     key: torch.nn.Linear(max(len(self.embedder.get_embed_cols(key)), 1) * self.dim + self.dim, proj_dim, device=device)
@@ -60,7 +74,6 @@ class AttnDBGNN(torch.nn.Module):
         # })
 
         self.proj_dim = proj_dim
-
 
     def forward(self, x_dict, edge_index_dict):
         new_x_dict = {}
@@ -73,9 +86,9 @@ class AttnDBGNN(torch.nn.Module):
 
             val = self.embedder(table_name, value)
             val = torch.concat((torch.ones(val.shape[0], 1, val.shape[2]), val), dim=1)
-            #val = val.reshape((val.shape[0], val.shape[1] * val.shape[2]))
+            # val = val.reshape((val.shape[0], val.shape[1] * val.shape[2]))
 
-            new_x_dict[table_name] = val # self.table_projection[table_name](val)
+            new_x_dict[table_name] = val  # self.table_projection[table_name](val)
 
         x = new_x_dict
 

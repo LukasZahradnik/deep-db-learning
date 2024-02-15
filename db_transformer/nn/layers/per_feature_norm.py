@@ -1,5 +1,6 @@
 import torch
 
+
 class PerFeatureNorm(torch.nn.Module):
     def __init__(self, n_features: int, axis: int) -> None:
         super().__init__()
@@ -11,4 +12,3 @@ class PerFeatureNorm(torch.nn.Module):
         x = self.norm(x)
         x = torch.transpose(x, -1, self.axis)
         return x
-  

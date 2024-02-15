@@ -8,12 +8,14 @@ from .schema_convertor import SchemaConvertor
 
 
 __all__ = [
-    'PerTypeConvertor',
+    "PerTypeConvertor",
 ]
 
 
 class PerTypeConvertor(SchemaConvertor):
-    def __init__(self, factories: Dict[Type[ColumnDef], Callable[[], Optional[ColumnConvertor]]]):
+    def __init__(
+        self, factories: Dict[Type[ColumnDef], Callable[[], Optional[ColumnConvertor]]]
+    ):
         super().__init__()
         self.factories = factories
         self.column_convertors = {}
@@ -21,7 +23,7 @@ class PerTypeConvertor(SchemaConvertor):
     def create(self, schema: Schema):
         for table_name, table_schema in schema.items():
             for column_name, column_def in table_schema.columns.items():
-                key = table_name + '/' + column_name
+                key = table_name + "/" + column_name
 
                 # find the correct factory
                 factory = None
@@ -39,15 +41,18 @@ class PerTypeConvertor(SchemaConvertor):
                             convertor.create(column_def)
                     except Exception as e:
                         raise Exception(
-                            f"Creating convertor for column {table_name}.{column_name} failed") from e
+                            f"Creating convertor for column {table_name}.{column_name} failed"
+                        ) from e
                     if convertor is not None:
                         self.column_convertors[key] = convertor
 
     def has(self, table_name: str, column_name: str, column: ColumnDef) -> bool:
-        key = table_name + '/' + column_name
+        key = table_name + "/" + column_name
         return key in self.column_convertors
 
-    def forward(self, value, table_name: str, column_name: str, column: ColumnDef) -> torch.Tensor:
-        key = table_name + '/' + column_name
+    def forward(
+        self, value, table_name: str, column_name: str, column: ColumnDef
+    ) -> torch.Tensor:
+        key = table_name + "/" + column_name
         assert self.has(table_name, column_name, column)
         return self.column_convertors[key].forward(value)

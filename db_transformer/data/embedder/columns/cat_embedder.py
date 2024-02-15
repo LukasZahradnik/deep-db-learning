@@ -5,7 +5,7 @@ from db_transformer.schema.columns import CategoricalColumnDef
 from .column_embedder import ColumnEmbedder
 
 __all__ = [
-    'CatEmbedder',
+    "CatEmbedder",
 ]
 
 

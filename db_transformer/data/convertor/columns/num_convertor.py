@@ -7,7 +7,7 @@ from .column_convertor import ColumnConvertor
 
 
 __all__ = [
-    'NumConvertor',
+    "NumConvertor",
 ]
 
 

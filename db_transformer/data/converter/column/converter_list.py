@@ -7,14 +7,16 @@ from db_transformer.schema.schema import ColumnDef
 
 from .series_converter import SeriesConverter
 
-__ALL__ = ['ConverterList']
+__ALL__ = ["ConverterList"]
 
 
 class ConverterList(SeriesConverter):
     def __init__(self, *converters: SeriesConverter) -> None:
         self.converters = converters
 
-    def __call__(self, column_def: ColumnDef, column: pd.Series) -> Tuple[Sequence[pd.Series], Sequence[ColumnDef]]:
+    def __call__(
+        self, column_def: ColumnDef, column: pd.Series
+    ) -> Tuple[Sequence[pd.Series], Sequence[ColumnDef]]:
         out: List[pd.Series] = []
         out_column_defs: List[ColumnDef] = []
 
