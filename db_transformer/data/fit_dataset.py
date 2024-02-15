@@ -19,9 +19,6 @@ from db_transformer.schema import Schema
 
 class FITRelationalDataset(DBDataset):
 
-    SQLDialect = Literal["postgresql", "mariadb"]
-    DEFAULT_DIALECT: SQLDialect = "mariadb"
-
     def __init__(
         self,
         database: str,
@@ -31,10 +28,9 @@ class FITRelationalDataset(DBDataset):
         target_column: Optional[str] = None,
         schema: Optional[Schema] = None,
         verbose=True,
-        dialect: SQLDialect = DEFAULT_DIALECT,
         cache_in_memory: bool = False,
     ):
-        connection_url = self.get_url(database, dialect)
+        connection_url = self.get_url(database)
 
         if target_table is None or target_column is None:
             try:
@@ -60,25 +56,19 @@ class FITRelationalDataset(DBDataset):
         )
 
     @classmethod
-    def get_url(cls, dataset: str, dialect: SQLDialect = "mariadb") -> str:
-        if dialect == "mariadb":
-            connector = "mariadb+mysqlconnector"
-            port = 3306
-        elif dialect == "postgresql":
-            connector = "postgresql+psycopg2"
-            port = 6543
+    def get_url(cls, dataset: str) -> str:
+        connector = "mariadb+mysqlconnector"
+        port = 3306
         return f"{connector}://guest:ctu-relational@78.128.250.186:{port}/{dataset}"
 
     @classmethod
-    def create_remote_connection(
-        cls, dataset: str, *, dialect: SQLDialect = DEFAULT_DIALECT
-    ):
+    def create_remote_connection(cls, dataset: str):
         """Create a new SQLAlchemy Connection instance to the remote database.
 
         Create a new SQLAlchemy Connection instance to the remote database.
         Don't forget to close the Connection after you are done using it!
         """
-        return Connection(create_engine(cls.get_url(dataset, dialect)))
+        return Connection(create_engine(cls.get_url(dataset)))
 
     @classmethod
     def create_schema_analyzer(
