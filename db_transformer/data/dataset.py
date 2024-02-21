@@ -39,17 +39,17 @@ from db_transformer.schema import (
 
 class DBDataset(Dataset):
     def __init__(
-            self,
-            database: str,
-            target_table: str,
-            target_column: str,
-            connection_url: Union[str, URL],
-            root: str,
-            strategy: BaseStrategy,
-            download: bool,
-            schema: Optional[Schema] = None,
-            verbose=True,
-            cache_in_memory=False,
+        self,
+        database: str,
+        target_table: str,
+        target_column: str,
+        connection_url: Union[str, URL],
+        root: str,
+        strategy: BaseStrategy,
+        download: bool,
+        schema: Optional[Schema] = None,
+        verbose=True,
+        cache_in_memory=False,
     ):
         # if the schema is None, it will be processed in the `process` method.
         self.schema = schema
@@ -85,9 +85,9 @@ class DBDataset(Dataset):
                 DateColumnDef: lambda: None,
                 # DateConvertor(dim, segments=["year", "month", "day"]),
                 # TimeColumnDef: lambda: TimeConvertor(dim, segments=['total_seconds']),
-                DateTimeColumnDef: lambda: None, 
+                DateTimeColumnDef: lambda: None,
                 # DateTimeConvertor(
-                    # dim, segments=["year", "month", "day", "total_seconds"]
+                # dim, segments=["year", "month", "day", "total_seconds"]
                 # ),
                 # DurationColumnDef: lambda: DurationConvertor(dim),
             }
@@ -147,7 +147,9 @@ class DBDataset(Dataset):
         return DBInspector(connection)
 
     @classmethod
-    def create_connection(cls, engine_or_url: Union[str, URL, Engine], **kwargs) -> Connection:
+    def create_connection(
+        cls, engine_or_url: Union[str, URL, Engine], **kwargs
+    ) -> Connection:
         """Create a new SQLAlchemy Connection instance (Don't forget to close it after you are done using it!)."""
         if isinstance(engine_or_url, Engine):
             engine = engine_or_url
@@ -178,7 +180,9 @@ class DBDataset(Dataset):
             self.connection = self.create_connection(self.local_connection_url)
 
         try:
-            with self.create_connection(self.upstream_connection_url) as upstream_connection:
+            with self.create_connection(
+                self.upstream_connection_url
+            ) as upstream_connection:
                 if self._verbose:
                     print("Copying database...", file=sys.stderr)
 
@@ -195,9 +199,11 @@ class DBDataset(Dataset):
             raise e
 
     def _create_schema_analyzer(self, connection: Connection) -> SchemaAnalyzer:
-        return SchemaAnalyzer(self._create_inspector(connection),
-                              target=(self.target_table, self.target_column),
-                              verbose=self._verbose)
+        return SchemaAnalyzer(
+            self._create_inspector(connection),
+            target=(self.target_table, self.target_column),
+            verbose=self._verbose,
+        )
 
     def process(self):
         if self.connection is None:
@@ -236,7 +242,9 @@ class DBDataset(Dataset):
             self.connection = self.create_connection(self.connection_url)
 
         assert self.schema is not None
-        return self.strategy.get_db_data(idx, self.connection, self.target_table, self.schema)
+        return self.strategy.get_db_data(
+            idx, self.connection, self.target_table, self.schema
+        )
 
     def get(self, idx: int) -> BaseData:
         if self.cache_in_memory and self.cache[idx] is not None:
@@ -254,7 +262,10 @@ class DBDataset(Dataset):
         hetero_data = HeteroData()
         primary_keys = defaultdict(dict)
 
-        col_to_index = {col_name: i for i, col_name in enumerate(self.schema[self.target_table].columns.keys())}
+        col_to_index = {
+            col_name: i
+            for i, col_name in enumerate(self.schema[self.target_table].columns.keys())
+        }
         label = target_row[col_to_index[self.target_column]]
 
         hetero_data["_target_table"].x = torch.tensor([1.0])
@@ -285,9 +296,13 @@ class DBDataset(Dataset):
                     target_idx = index
 
                 row_tensor_data = [
-                    self.ones
-                    if table_name == self.target_table and col_name == self.target_column and row == target_row
-                    else self.convertor(row[i], table_name, col_name, col)
+                    (
+                        self.ones
+                        if table_name == self.target_table
+                        and col_name == self.target_column
+                        and row == target_row
+                        else self.convertor(row[i], table_name, col_name, col)
+                    )
                     for i, col_name, col in process_cols
                 ]
 
@@ -306,10 +321,14 @@ class DBDataset(Dataset):
                 hetero_data[table_name].x = torch.flatten(torch.stack(table_tensor_data), 1)
 
         for table_name, table_data in data.items():
-            col_to_index = {col_name: i for i, col_name in enumerate(self.schema[table_name].columns.keys())}
+            col_to_index = {
+                col_name: i
+                for i, col_name in enumerate(self.schema[table_name].columns.keys())
+            }
 
             foreign_cols = [
-                (col_to_index[foreigns.columns[0]], foreigns) for foreigns in self.schema[table_name].foreign_keys
+                (col_to_index[foreigns.columns[0]], foreigns)
+                for foreigns in self.schema[table_name].foreign_keys
             ]
 
             if not foreign_cols:
@@ -334,9 +353,13 @@ class DBDataset(Dataset):
                         torch.tensor([[], []], dtype=torch.long)
                     )
 
-        hetero_data["_target_table", "rel", self.target_table].edge_index = torch.tensor([
-            [0], [target_idx],
-        ], dtype=torch.long)
+        hetero_data["_target_table", "rel", self.target_table].edge_index = torch.tensor(
+            [
+                [0],
+                [target_idx],
+            ],
+            dtype=torch.long,
+        )
 
         hetero_data = T.ToUndirected()(hetero_data)
         hetero_data = T.AddSelfLoops()(hetero_data)

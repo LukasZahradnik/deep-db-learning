@@ -7,33 +7,43 @@ from torch_geometric.data.dataset import Union
 
 from db_transformer.data.convertor.columns.column_convertor import ColumnConvertor
 from db_transformer.data.convertor.columns.num_convertor import NumConvertor
-from db_transformer.schema.columns import ColumnDef, DateColumnDef, DateTimeColumnDef, DurationColumnDef, TimeColumnDef
+from db_transformer.schema.columns import (
+    ColumnDef,
+    DateColumnDef,
+    DateTimeColumnDef,
+    DurationColumnDef,
+    TimeColumnDef,
+)
 
 
 __all__ = [
-    'DateSegment',
-    'DateConvertor',
-    'TimeSegment',
-    'TimeConvertor',
-    'DateTimeSegment',
-    'DateTimeConvertor',
-    'DurationConvertor',
+    "DateSegment",
+    "DateConvertor",
+    "TimeSegment",
+    "TimeConvertor",
+    "DateTimeSegment",
+    "DateTimeConvertor",
+    "DurationConvertor",
 ]
 
-_TColumnDef = TypeVar('_TColumnDef', bound=ColumnDef)
-_TSegment = TypeVar('_TSegment', bound=str)
+_TColumnDef = TypeVar("_TColumnDef", bound=ColumnDef)
+_TSegment = TypeVar("_TSegment", bound=str)
 
 
-class _SegmentedConvertor(ColumnConvertor[_TColumnDef], Generic[_TColumnDef, _TSegment], ABC):
+class _SegmentedConvertor(
+    ColumnConvertor[_TColumnDef], Generic[_TColumnDef, _TSegment], ABC
+):
     def __init__(self, segments: List[_TSegment]) -> None:
         super().__init__()
-        self.segment_convertors = torch.nn.ModuleDict({
-            segment: NumConvertor() for segment in segments
-        })
+        self.segment_convertors = torch.nn.ModuleDict(
+            {segment: NumConvertor() for segment in segments}
+        )
 
         if len(self.segment_convertors) == 0:
-            raise ValueError(f"Must specify dimensionalities for at least one of the following segments (those you want represented): "
-                             f"{self.get_all_segments()}")
+            raise ValueError(
+                f"Must specify dimensionalities for at least one of the following segments (those you want represented): "
+                f"{self.get_all_segments()}"
+            )
 
     @classmethod
     @abstractmethod
@@ -62,16 +72,16 @@ class _SegmentedConvertor(ColumnConvertor[_TColumnDef], Generic[_TColumnDef, _TS
         return torch.concat(tensors)
 
 
-DateSegment = Literal['year', 'month', 'day', 'ordinal', 'timestamp']
+DateSegment = Literal["year", "month", "day", "ordinal", "timestamp"]
 
 
 class DateConvertor(_SegmentedConvertor[DateColumnDef, DateSegment]):
     _DATE_SEGMENT_TO_NUMERIC: Dict[DateSegment, Callable[[datetime], float]] = {
-        'year': lambda datetime: datetime.year,
-        'month': lambda datetime: datetime.month,
-        'day': lambda datetime: datetime.day,
-        'ordinal': lambda datetime: datetime.toordinal(),
-        'timestamp': lambda datetime: datetime.timestamp(),
+        "year": lambda datetime: datetime.year,
+        "month": lambda datetime: datetime.month,
+        "day": lambda datetime: datetime.day,
+        "ordinal": lambda datetime: datetime.toordinal(),
+        "timestamp": lambda datetime: datetime.timestamp(),
     }
 
     @classmethod
@@ -80,21 +90,21 @@ class DateConvertor(_SegmentedConvertor[DateColumnDef, DateSegment]):
 
     def _retrieve_segment_value(self, segment: DateSegment, value: Any) -> float:
         if value is not None:
-            value = datetime.strptime(value, '%Y-%m-%d')
+            value = datetime.strptime(value, "%Y-%m-%d")
             return self._DATE_SEGMENT_TO_NUMERIC[segment](value)
 
         return 0  # TODO how to handle None?
 
 
-TimeSegment = Literal['hours', 'minutes', 'seconds', 'total_seconds']
+TimeSegment = Literal["hours", "minutes", "seconds", "total_seconds"]
 
 
 class TimeConvertor(_SegmentedConvertor[TimeColumnDef, TimeSegment]):
     _TIME_SEGMENT_TO_NUMERIC: Dict[TimeSegment, Callable[[time], float]] = {
-        'hours': lambda time: time.hour,
-        'minutes': lambda time: time.minute,
-        'seconds': lambda time: time.second,
-        'total_seconds': lambda time: time.hour * 3600 + time.minute * 60 + time.second,
+        "hours": lambda time: time.hour,
+        "minutes": lambda time: time.minute,
+        "seconds": lambda time: time.second,
+        "total_seconds": lambda time: time.hour * 3600 + time.minute * 60 + time.second,
     }
 
     @classmethod
@@ -116,6 +126,7 @@ def _merge_segments() -> Dict[DateTimeSegment, Callable[[datetime], float]]:
     for segment, c_time in TimeConvertor._TIME_SEGMENT_TO_NUMERIC.items():
         out[segment] = lambda datetime: c_time(datetime.time())
     return out
+
 
 class DateTimeConvertor(_SegmentedConvertor[DateTimeColumnDef, DateTimeSegment]):
     _DATETIME_SEGMENT_TO_NUMERIC = _merge_segments()

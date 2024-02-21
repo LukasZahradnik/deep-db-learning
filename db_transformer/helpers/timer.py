@@ -3,13 +3,10 @@ from typing import Dict, Literal, Optional
 
 from torch.cuda import Event
 
-Unit = Literal['ms', 's']
+Unit = Literal["ms", "s"]
 
 
-MS_TO_UNIT: Dict[Unit, float] = {
-    'ms': 1.,
-    's': 1e-3
-}
+MS_TO_UNIT: Dict[Unit, float] = {"ms": 1.0, "s": 1e-3}
 
 
 class Timer:

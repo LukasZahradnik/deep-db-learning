@@ -9,17 +9,16 @@ from typing import Any, Iterable, Mapping, Optional, Protocol, Type, TypeVar, ov
 import attrs
 
 __all__ = [
-    'SimpleSerializer',
-    'TypedSerializer',
-    'TypedDeserializer',
-    'serialize',
-    'deserialize',
+    "SimpleSerializer",
+    "TypedSerializer",
+    "TypedDeserializer",
+    "serialize",
+    "deserialize",
 ]
 
 
 class Serializer(Protocol):
-    def __call__(self, obj) -> Any:
-        ...
+    def __call__(self, obj) -> Any: ...
 
 
 class SimpleSerializer(Serializer):
@@ -37,25 +36,28 @@ class SimpleSerializer(Serializer):
         self.child_serializer = child_serializer
 
     def __call__(self, obj) -> Any:
-        if isinstance(obj, object) and callable(getattr(obj, '__getstate__', None)):
+        if isinstance(obj, object) and callable(getattr(obj, "__getstate__", None)):
             # pickle using the standard Python pickle process
 
             out = self.child_serializer(obj.__getstate__())
-            if callable(getattr(obj, '__getnewargs_ex__', None)):
-                out[self.PICKLE_NEWARGS], out[self.PICKLE_NEWKWARGS] = obj.__getnewargs_ex__()
-            elif callable(getattr(obj, '__getnewargs__', None)):
+            if callable(getattr(obj, "__getnewargs_ex__", None)):
+                out[self.PICKLE_NEWARGS], out[self.PICKLE_NEWKWARGS] = (
+                    obj.__getnewargs_ex__()
+                )
+            elif callable(getattr(obj, "__getnewargs__", None)):
                 out[self.PICKLE_NEWARGS] = obj.__getnewargs__()
 
             return out
-        elif isinstance(obj, object) and getattr(obj, '__dict__', None) is not None:
+        elif isinstance(obj, object) and getattr(obj, "__dict__", None) is not None:
             # default pickling fallback for objects
             return self.child_serializer(obj.__dict__)
         elif isinstance(obj, Mapping):
             # is most likely a dictionary
             return {k: self.child_serializer(obj[k]) for k in obj}
-        elif (not isinstance(obj, str) and
-                ((isinstance(obj, object) and getattr(obj, "__iter__", None) is not None)
-                    or (isinstance(obj, Iterable)))):
+        elif not isinstance(obj, str) and (
+            (isinstance(obj, object) and getattr(obj, "__iter__", None) is not None)
+            or (isinstance(obj, Iterable))
+        ):
             # is basically a list
             return [self.child_serializer(v) for v in obj]
         else:
@@ -72,9 +74,16 @@ class TypedSerializer(Serializer):
     _PRIMITIVE_TYPES = {list, dict, float, int, bool, str}
     """Types that do not require an explicit type_key."""
 
-    def __init__(self, delegate_serializer: Optional['Serializer'] = None, type_key='__type', state_key='__state'):
+    def __init__(
+        self,
+        delegate_serializer: Optional["Serializer"] = None,
+        type_key="__type",
+        state_key="__state",
+    ):
         if delegate_serializer is None:
-            delegate_serializer = SimpleSerializer(child_serializer=self)  # wrap recursively with types as well
+            delegate_serializer = SimpleSerializer(
+                child_serializer=self
+            )  # wrap recursively with types as well
 
         self.child_serializer = delegate_serializer
         self.type_key = type_key
@@ -87,7 +96,11 @@ class TypedSerializer(Serializer):
         serialized = self.child_serializer(obj)
 
         # wrap with type info
-        if isinstance(obj, object) and (type(obj) != type(serialized) or obj != serialized) and type(obj) not in self._PRIMITIVE_TYPES:
+        if (
+            isinstance(obj, object)
+            and (type(obj) != type(serialized) or obj != serialized)
+            and type(obj) not in self._PRIMITIVE_TYPES
+        ):
             the_type = self._get_type(obj.__class__)
             if isinstance(serialized, dict):
                 serialized[self.type_key] = the_type
@@ -97,24 +110,27 @@ class TypedSerializer(Serializer):
         return serialized
 
 
-_T = TypeVar('_T')
+_T = TypeVar("_T")
 
 
 class Deserializer(Protocol):
     @overload
-    def __call__(self, obj: Any, type: Type[_T]) -> _T:
-        ...
+    def __call__(self, obj: Any, type: Type[_T]) -> _T: ...
 
     @overload
-    def __call__(self, obj: Any) -> Any:
-        ...
+    def __call__(self, obj: Any) -> Any: ...
 
     def __call__(self, obj: Any, type: Optional[Type] = None) -> Any:
         pass
 
 
 class TypedDeserializer:
-    def __init__(self, child_deserializer: Optional['Serializer'] = None, type_key='__type', state_key='__state'):
+    def __init__(
+        self,
+        child_deserializer: Optional["Serializer"] = None,
+        type_key="__type",
+        state_key="__state",
+    ):
         self.type_key = type_key
         self.state_key = state_key
 
@@ -139,8 +155,7 @@ class TypedDeserializer:
         pass
 
     @overload
-    def __call__(self, obj: Any) -> Any:
-        ...
+    def __call__(self, obj: Any) -> Any: ...
 
     def __call__(self, obj: Any, type: Optional[Type] = None):
         # try and obtain the type, if applicable
@@ -168,14 +183,18 @@ class TypedDeserializer:
             elif SimpleSerializer.PICKLE_NEWKWARGS in state:
                 kargs = state[SimpleSerializer.PICKLE_NEWKWARGS]
 
-            if not kargs and not kwargs and (attrs.has(cls) or dataclasses.is_dataclass(cls)):
+            if (
+                not kargs
+                and not kwargs
+                and (attrs.has(cls) or dataclasses.is_dataclass(cls))
+            ):
                 # special treatment of dataclasses and attrs-type dataclasses (reason: default field values)
                 instance = cls(**state)
             else:
                 # resolve like standard Python pickled file
                 instance = cls.__new__(cls, *kargs, **kwargs)
 
-                if state is not False and callable(getattr(instance, '__setstate__', None)):
+                if state is not False and callable(getattr(instance, "__setstate__", None)):
                     instance.__setstate__(state)
                 else:
                     instance.__dict__.update(state)
@@ -187,9 +206,10 @@ class TypedDeserializer:
         if isinstance(obj, Mapping):
             # is a different form of a mapping (e.g. a dictionary)
             return {k: self.child_deserializer(obj[k]) for k in obj}
-        elif (not isinstance(obj, str) and
-                ((isinstance(obj, object) and getattr(obj, "__iter__", None) is not None)
-                    or (isinstance(obj, Iterable)))):
+        elif not isinstance(obj, str) and (
+            (isinstance(obj, object) and getattr(obj, "__iter__", None) is not None)
+            or (isinstance(obj, Iterable))
+        ):
             # is an iterable
             return [self.child_deserializer(v) for v in obj]
         else:

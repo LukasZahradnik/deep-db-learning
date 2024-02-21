@@ -7,14 +7,14 @@ from .schema import ColumnDef, named_column_def
 # specifically kw_only, which is in Python's dataclasses only since Python 3.10.
 
 __all__ = [
-    'CategoricalColumnDef',
-    'NumericColumnDef',
-    'DateColumnDef',
-    'DateTimeColumnDef',
-    'DurationColumnDef',
-    'TimeColumnDef',
-    'TextColumnDef',
-    'OmitColumnDef',
+    "CategoricalColumnDef",
+    "NumericColumnDef",
+    "DateColumnDef",
+    "DateTimeColumnDef",
+    "DurationColumnDef",
+    "TimeColumnDef",
+    "TextColumnDef",
+    "OmitColumnDef",
 ]
 
 
@@ -29,7 +29,7 @@ class _AttrsColumnDef(ColumnDef):
     """Whether the column is part of the table's primary key"""
 
 
-@named_column_def('cat')
+@named_column_def("cat")
 @define(kw_only=True)
 class CategoricalColumnDef(_AttrsColumnDef):
     """
@@ -41,50 +41,52 @@ class CategoricalColumnDef(_AttrsColumnDef):
     """The cardinality of the categorical variable"""
 
 
-@named_column_def('num')
+@named_column_def("num")
 @define(kw_only=True)
 class NumericColumnDef(_AttrsColumnDef):
     """
-    Numeric column definition - containing numeric data that should be interpreted strictly as-is 
+    Numeric column definition - containing numeric data that should be interpreted strictly as-is
     (as opposed to representing categorical data).
     """
+
     pass
 
-@named_column_def('date')
+
+@named_column_def("date")
 @define(kw_only=True)
 class DateColumnDef(_AttrsColumnDef):
     pass
 
 
-@named_column_def('datetime')
+@named_column_def("datetime")
 @define(kw_only=True)
 class DateTimeColumnDef(_AttrsColumnDef):
     pass
 
 
-@named_column_def('duration')
+@named_column_def("duration")
 @define(kw_only=True)
 class DurationColumnDef(_AttrsColumnDef):
     pass
 
 
-@named_column_def('time')
+@named_column_def("time")
 @define(kw_only=True)
 class TimeColumnDef(_AttrsColumnDef):
     pass
 
 
-@named_column_def('text')
+@named_column_def("text")
 @define(kw_only=True)
 class TextColumnDef(_AttrsColumnDef):
     pass
 
 
-@named_column_def('omit')
+@named_column_def("omit")
 @define(kw_only=True)
 class OmitColumnDef(_AttrsColumnDef):
     """
     Column definition that marks the column as to be ignored by the machine learning pipeline.
     """
-    pass
 
+    pass

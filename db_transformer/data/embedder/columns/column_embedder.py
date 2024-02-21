@@ -4,10 +4,10 @@ import torch
 
 from db_transformer.schema.columns import ColumnDef
 
-_TColumnDef = TypeVar('_TColumnDef', bound=ColumnDef)
+_TColumnDef = TypeVar("_TColumnDef", bound=ColumnDef)
 
 __all__ = [
-    'ColumnEmbedder',
+    "ColumnEmbedder",
 ]
 
 

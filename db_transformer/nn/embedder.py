@@ -3,6 +3,7 @@ import torch
 from db_transformer.data.embedder import TableEmbedder, NumEmbedder, CatEmbedder
 from db_transformer.schema import NumericColumnDef, CategoricalColumnDef
 
+
 class Embedder(torch.nn.Module):
     def __init__(self, dim, schema, column_defs, column_names, config):
         super().__init__()

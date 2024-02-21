@@ -10,9 +10,9 @@ from db_transformer.helpers.collections.set_filter import SetFilterProtocol
 from db_transformer.schema.schema import ForeignKeyDef
 
 __ALL__ = [
-    'DBInspectorInterface',
-    'DBInspector',
-    'CachedDBInspector',
+    "DBInspectorInterface",
+    "DBInspector",
+    "CachedDBInspector",
 ]
 
 
@@ -66,11 +66,12 @@ class DBInspector(DBInspectorInterface):
     its tables, columns, and values.
     """
 
-    def __init__(self,
-                 connection: Connection,
-                 table_filter: Optional[SetFilterProtocol[str]] = None,
-                 column_filters: Optional[Dict[str, SetFilterProtocol[str]]] = None,
-                 ):
+    def __init__(
+        self,
+        connection: Connection,
+        table_filter: Optional[SetFilterProtocol[str]] = None,
+        column_filters: Optional[Dict[str, SetFilterProtocol[str]]] = None,
+    ):
         """
         :field connection: The database connection - instance of SQLAlchemy's `Connection` class.
         :field table_filter: A :py:class:`db_transformer.helpers.collections.set_filter.SetFilter` instance or a callable that filters a set of values. \
@@ -114,7 +115,7 @@ All values that remain are the tables that the inspector will be aware of; exclu
         return out
 
     def get_columns(self, table: str) -> Dict[str, TypeEngine]:
-        out = {col['name']: col['type'] for col in self._inspect.get_columns(table)}
+        out = {col["name"]: col["type"] for col in self._inspect.get_columns(table)}
 
         filt = self._column_filters.get(table, None)
         if filt is not None:
@@ -132,17 +133,17 @@ All values that remain are the tables that the inspector will be aware of; exclu
         return out
 
     def get_primary_key(self, table: str) -> Set[str]:
-        return set(self._inspect.get_pk_constraint(table)['constrained_columns'])
+        return set(self._inspect.get_pk_constraint(table)["constrained_columns"])
 
     def get_foreign_keys(self, table: str) -> Dict[FrozenSet[str], ForeignKeyDef]:
         return {
-            frozenset(fk['constrained_columns']):
-            ForeignKeyDef(
-                columns=fk['constrained_columns'],
-                ref_table=fk['referred_table'],
-                ref_columns=fk['referred_columns']
+            frozenset(fk["constrained_columns"]): ForeignKeyDef(
+                columns=fk["constrained_columns"],
+                ref_table=fk["referred_table"],
+                ref_columns=fk["referred_columns"],
             )
-            for fk in self._inspect.get_foreign_keys(table)}
+            for fk in self._inspect.get_foreign_keys(table)
+        }
 
 
 class CachedDBInspector(DBInspectorInterface):

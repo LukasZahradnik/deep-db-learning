@@ -3,7 +3,7 @@ import torch
 from .column_embedder import ColumnEmbedder
 
 __all__ = [
-    'NumEmbedder',
+    "NumEmbedder",
 ]
 
 

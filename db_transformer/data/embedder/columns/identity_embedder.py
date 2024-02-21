@@ -4,7 +4,7 @@ from .column_embedder import ColumnEmbedder
 
 
 __ALL__ = [
-    'IdentityEmbedder',
+    "IdentityEmbedder",
 ]
 
 

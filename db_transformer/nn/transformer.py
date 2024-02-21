@@ -4,6 +4,7 @@ from torch_geometric.nn import HeteroConv, Linear, MessagePassing
 from db_transformer.data.embedder import TableEmbedder, NumEmbedder, CatEmbedder
 from db_transformer.schema import NumericColumnDef, CategoricalColumnDef
 
+
 class TransformerGNN(MessagePassing):
     def __init__(self, in_channels, ff_dim, num_heads, aggr="mean"):
         super().__init__(aggr=aggr, node_dim=-3)
@@ -12,7 +13,9 @@ class TransformerGNN(MessagePassing):
 
         # self.lin = Linear(in_channels, in_channels, bias=True)
 
-        self.transformer = torch.nn.MultiheadAttention(self.in_channels, num_heads, batch_first=True)
+        self.transformer = torch.nn.MultiheadAttention(
+            self.in_channels, num_heads, batch_first=True
+        )
         # self.transformer = torch.nn.TransformerEncoderLayer(self.in_channels, num_heads, dim_feedforward=ff_dim, batch_first=True)
 
         # self.b_proj = torch.nn.Linear(in_channels, in_channels)
@@ -41,22 +44,38 @@ class DBTransformerLayer(torch.nn.Module):
         super().__init__()
 
         if False:
-            self.self_attn = torch.nn.ModuleDict({
-                key: torch.nn.MultiheadAttention(dim, num_heads, batch_first=True)
-                for key in schema.keys()
-            })
+            self.self_attn = torch.nn.ModuleDict(
+                {
+                    key: torch.nn.MultiheadAttention(dim, num_heads, batch_first=True)
+                    for key in schema.keys()
+                }
+            )
 
         convs = {m: TransformerGNN(dim, ff_dim, num_heads, aggr) for m in metadata[1]}
         self.hetero = HeteroConv(convs, aggr=aggr)
 
     def forward(self, x_dict, edge_index_dict):
-       #  x_dict = {k: self.self_attn[k](x, x, x)[0] for k, x in x_dict.items()}
+        #  x_dict = {k: self.self_attn[k](x, x, x)[0] for k, x in x_dict.items()}
 
         return self.hetero(x_dict, edge_index_dict)
-    
+
 
 class DBTransformer(torch.nn.Module):
-    def __init__(self, dim, out_channels, ff_dim, layers, metadata, num_heads, schema, column_defs, column_names, config, target_table, aggr="mean"):
+    def __init__(
+        self,
+        dim,
+        out_channels,
+        ff_dim,
+        layers,
+        metadata,
+        num_heads,
+        schema,
+        column_defs,
+        column_names,
+        config,
+        target_table,
+        aggr="mean",
+    ):
         super().__init__()
 
         self.out_lin = Linear(dim, out_channels, bias=True)
@@ -74,15 +93,16 @@ class DBTransformer(torch.nn.Module):
             column_names=column_names,
         )
 
-        self.transformer_layers = torch.nn.ModuleList([
-            DBTransformerLayer(dim, ff_dim, metadata, num_heads, schema, aggr)
-            for _ in range(layers)
-        ])
-
+        self.transformer_layers = torch.nn.ModuleList(
+            [
+                DBTransformerLayer(dim, ff_dim, metadata, num_heads, schema, aggr)
+                for _ in range(layers)
+            ]
+        )
 
     def forward(self, x_dict, edge_index_dict):
         x_dict = self.embedder(x_dict)
-        
+
         for layer in self.transformer_layers:
             x_dict = layer(x_dict, edge_index_dict)
 

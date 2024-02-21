@@ -6,7 +6,7 @@ from .column_convertor import ColumnConvertor
 
 
 __all__ = [
-    'CatConvertor',
+    "CatConvertor",
 ]
 
 
@@ -29,7 +29,8 @@ class CatConvertor(ColumnConvertor[CategoricalColumnDef]):
             raise ValueError(
                 f"Found at least {len(self.value_to_idx)} unique values "
                 f"(expected cardinality: {self.classes}). "
-                f"The values are: {list(self.value_to_idx.keys())}")
+                f"The values are: {list(self.value_to_idx.keys())}"
+            )
 
         return torch.tensor([index])
 
@@ -42,4 +43,3 @@ class CatConvertor(ColumnConvertor[CategoricalColumnDef]):
         one_hot[index] = 1.0
 
         return one_hot
-

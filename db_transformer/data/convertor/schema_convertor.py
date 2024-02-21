@@ -6,7 +6,7 @@ from db_transformer.schema.schema import Schema
 
 
 __all__ = [
-    'SchemaConvertor',
+    "SchemaConvertor",
 ]
 
 
@@ -20,8 +20,12 @@ class SchemaConvertor(ABC):
         pass
 
     @abstractmethod
-    def forward(self, value, table_name: str, column_name: str, column: ColumnDef) -> torch.Tensor:
+    def forward(
+        self, value, table_name: str, column_name: str, column: ColumnDef
+    ) -> torch.Tensor:
         pass
 
-    def __call__(self, value, table_name: str, column_name: str, column: ColumnDef) -> torch.Tensor:
+    def __call__(
+        self, value, table_name: str, column_name: str, column: ColumnDef
+    ) -> torch.Tensor:
         return self.forward(value, table_name, column_name, column)
