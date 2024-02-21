@@ -1,8 +1,10 @@
+import pickle
 import sys, os, warnings
+
 
 sys.path.append(os.getcwd())
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pandas as pd
 
@@ -10,15 +12,18 @@ from sqlalchemy.engine import Connection, create_engine
 from sqlalchemy.schema import MetaData, Table as SQLTable
 from sqlalchemy.sql import select, text
 
-from db_transformer.db.db_inspector import DBInspector
-
 from relbench.data import Dataset, BaseTask, Database, Table
 from relbench.metrics import accuracy, average_precision, f1, mae, rmse, roc_auc
 
+from db_transformer.db.db_inspector import DBInspector
+from db_transformer.schema.schema import Schema
+from db_transformer.db.schema_autodetect import SchemaAnalyzer
+from db_transformer.data.utils.heterodata_builder import HeteroDataBuilder
 from db_transformer.data.relbench.ctu_repository_defauts import (
     CTUDatasetName,
     CTU_REPOSITORY_DEFAULTS,
 )
+
 
 from db_transformer.data.relbench.ctu_task import CTUTask
 
@@ -42,14 +47,16 @@ class CTUDataset(Dataset):
         db_dir = os.path.join(data_dir, name, "db")
 
         if not force_remake and os.path.exists(db_dir):
+            self.schema = self.__load_schema(os.path.join(db_dir, "schema.pickle"))
             db = Database.load(db_dir)
             if len(db.table_dict) == 0:
                 db = None
 
         if db == None:
-            db = self.make_db(name)
+            db, self.schema = self.make_db(name)
             if save_db:
                 db.save(db_dir)
+                self.__save_schema(os.path.join(db_dir, "schema.pickle"))
 
         if tasks == None:
             tasks = [CTUTask]
@@ -63,13 +70,13 @@ class CTUDataset(Dataset):
         return CTUTask(dataset=self)
 
     @classmethod
-    def get_url(cls, dataset: str) -> str:
+    def get_url(cls, dataset: CTUDatasetName) -> str:
         connector = "mariadb+mysqlconnector"
         port = 3306
         return f"{connector}://guest:ctu-relational@78.128.250.186:{port}/{dataset}"
 
     @classmethod
-    def create_remote_connection(cls, dataset: str):
+    def create_remote_connection(cls, dataset: CTUDatasetName):
         """Create a new SQLAlchemy Connection instance to the remote database.
 
         Create a new SQLAlchemy Connection instance to the remote database.
@@ -78,10 +85,15 @@ class CTUDataset(Dataset):
         return Connection(create_engine(cls.get_url(dataset)))
 
     @classmethod
-    def make_db(cls, dataset: str) -> Database:
+    def make_db(cls, dataset: CTUDatasetName) -> Tuple[Database, Schema]:
         remote_conn = cls.create_remote_connection(dataset)
 
+        defaults = CTU_REPOSITORY_DEFAULTS[dataset]
+
         inspector = DBInspector(remote_conn)
+
+        analyzer = SchemaAnalyzer(remote_conn, target=defaults.target)
+        schema = analyzer.guess_schema()
 
         remote_md = MetaData()
         remote_md.reflect(bind=inspector.engine)
@@ -116,7 +128,15 @@ class CTUDataset(Dataset):
                 df=df, fkey_col_to_pkey_table=fk_dict, pkey_col=pkey_col
             )
 
-        return Database(tables)
+        return Database(tables), schema
+
+    def __save_schema(self, path: str):
+        with open(path, "wb") as f:
+            pickle.dump(self.schema, f, pickle.HIGHEST_PROTOCOL)
+
+    def __load_schema(path: str) -> Schema:
+        with open(path, "rb") as f:
+            return pickle.load(f)
 
 
 MARIADB_TO_PANDAS = {
@@ -155,8 +175,8 @@ MARIADB_TO_PANDAS = {
 
 
 if __name__ == "__main__":
-    dataset = CTUDataset(name="classicmodels", force_remake=False)
-    task = dataset.get_task()
+    dataset = CTUDataset(name="CORA", force_remake=False)
+    # task = dataset.get_task()
 
-    print(task.train_table.df)
+    # print(task.train_table.df)
     # print(dataset.db.table_dict)
