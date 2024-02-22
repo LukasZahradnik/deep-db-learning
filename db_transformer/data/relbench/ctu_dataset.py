@@ -1,9 +1,6 @@
 import pickle
 import sys, os, warnings
 
-
-sys.path.append(os.getcwd())
-
 from typing import Dict, List, Tuple
 
 import pandas as pd
@@ -61,7 +58,7 @@ class CTUDataset(Dataset):
         if tasks == None:
             tasks = [CTUTask]
 
-        super().__init__(db, pd.Timestamp.today(), pd.Timestamp.today(), tasks)
+        super().__init__(db, pd.Timestamp.today(), pd.Timestamp.today(), 0, tasks)
 
     def validate_and_correct_db(self):
         return
@@ -92,7 +89,7 @@ class CTUDataset(Dataset):
 
         inspector = DBInspector(remote_conn)
 
-        analyzer = SchemaAnalyzer(remote_conn, target=defaults.target)
+        analyzer = SchemaAnalyzer(remote_conn)
         schema = analyzer.guess_schema()
 
         remote_md = MetaData()
@@ -134,7 +131,7 @@ class CTUDataset(Dataset):
         with open(path, "wb") as f:
             pickle.dump(self.schema, f, pickle.HIGHEST_PROTOCOL)
 
-    def __load_schema(path: str) -> Schema:
+    def __load_schema(self, path: str) -> Schema:
         with open(path, "rb") as f:
             return pickle.load(f)
 
@@ -172,11 +169,3 @@ MARIADB_TO_PANDAS = {
     "MEDIUMBLOB": "object",
     "LONGBLOB": "object",
 }
-
-
-if __name__ == "__main__":
-    dataset = CTUDataset(name="CORA", force_remake=False)
-    # task = dataset.get_task()
-
-    # print(task.train_table.df)
-    # print(dataset.db.table_dict)
