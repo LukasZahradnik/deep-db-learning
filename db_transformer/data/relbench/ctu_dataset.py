@@ -1,21 +1,56 @@
+import sys, os
+
+# sys.path.append(os.getcwd())
+
+from typing import Dict, List, Optional, Tuple, Type
+from collections import OrderedDict
 import pickle
-import sys, os, warnings
+import warnings
 
-from typing import Dict, List, Tuple
-
+import numpy as np
 import pandas as pd
 
 from sqlalchemy.engine import Connection, create_engine
 from sqlalchemy.schema import MetaData, Table as SQLTable
 from sqlalchemy.sql import select, text
 
-from relbench.data import Dataset, BaseTask, Database, Table
-from relbench.metrics import accuracy, average_precision, f1, mae, rmse, roc_auc
+import torch
 
+import torch_geometric.transforms as T
+from torch_geometric.data import HeteroData
+
+from sentence_transformers import SentenceTransformer
+
+from torch_frame.config import TextEmbedderConfig
+from torch_frame.data import Dataset
+from torch_frame.utils import infer_df_stype
+
+from relbench.data import Dataset as RelBenchDataset, BaseTask, Database, Table
+
+from db_transformer.data.converter import (
+    CategoricalConverter,
+    ConverterList,
+    DataFrameConverter,
+    DateConverter,
+    DateTimeConverter,
+    IdentityConverter,
+    OmitConverter,
+    TimeConverter,
+    TimestampConverter,
+    SimpleDataFrameConverter,
+    PerTypeSeriesConverter,
+    SeriesConverter,
+)
 from db_transformer.db.db_inspector import DBInspector
-from db_transformer.schema.schema import Schema
 from db_transformer.db.schema_autodetect import SchemaAnalyzer
-from db_transformer.data.utils.heterodata_builder import HeteroDataBuilder
+from db_transformer.schema.schema import ColumnDef, ForeignKeyDef, Schema
+from db_transformer.schema.columns import (
+    CategoricalColumnDef,
+    DateColumnDef,
+    DateTimeColumnDef,
+    NumericColumnDef,
+    TimeColumnDef,
+)
 from db_transformer.data.relbench.ctu_repository_defauts import (
     CTUDatasetName,
     CTU_REPOSITORY_DEFAULTS,
@@ -25,7 +60,28 @@ from db_transformer.data.relbench.ctu_repository_defauts import (
 from db_transformer.data.relbench.ctu_task import CTUTask
 
 
-class CTUDataset(Dataset):
+class GloveTextEmbedding:
+    def __init__(self):
+        self.model = SentenceTransformer(
+            "sentence-transformers/average_word_embeddings_glove.6B.300d"
+        )
+
+    def __call__(self, sentences: List[str]) -> torch.Tensor:
+        return torch.from_numpy(self.model.encode(sentences))
+
+
+class CTUDataset(RelBenchDataset):
+    the_converters: OrderedDict[Optional[Type[ColumnDef]], SeriesConverter] = OrderedDict(
+        (
+            (CategoricalColumnDef, CategoricalConverter()),
+            (NumericColumnDef, IdentityConverter()),
+            (DateColumnDef, DateConverter()),
+            (DateTimeColumnDef, DateTimeConverter()),
+            (TimeColumnDef, TimeConverter()),
+            (None, OmitConverter()),
+        )
+    )
+
     def __init__(
         self,
         name: CTUDatasetName,
@@ -41,7 +97,9 @@ class CTUDataset(Dataset):
         self.data_dir = data_dir
 
         db = None
-        db_dir = os.path.join(data_dir, name, "db")
+        self.root_dir = os.path.join(data_dir, name)
+
+        db_dir = os.path.join(self.root_dir, "db")
 
         if not force_remake and os.path.exists(db_dir):
             self.schema = self.__load_schema(os.path.join(db_dir, "schema.pickle"))
@@ -58,6 +116,15 @@ class CTUDataset(Dataset):
         if tasks == None:
             tasks = [CTUTask]
 
+        self.converter = SimpleDataFrameConverter(
+            series_converter=PerTypeSeriesConverter(*self.the_converters.items()),
+            schema=self.schema,
+        )
+
+        self.text_embedder_cfg = TextEmbedderConfig(
+            text_embedder=GloveTextEmbedding(), batch_size=32
+        )
+
         super().__init__(db, pd.Timestamp.today(), pd.Timestamp.today(), 0, tasks)
 
     def validate_and_correct_db(self):
@@ -65,6 +132,56 @@ class CTUDataset(Dataset):
 
     def get_task(self) -> BaseTask:
         return CTUTask(dataset=self)
+
+    def build_hetero_data(
+        self, device=None
+    ) -> Tuple[HeteroData, Dict[str, List[ColumnDef]]]:
+        data = HeteroData()
+
+        # get all tables
+        table_dfs = {
+            table_name: table.df for table_name, table in self.db.table_dict.items()
+        }
+
+        out_column_defs: Dict[str, List[ColumnDef]] = {}
+        for table_name, table_schema in self.schema.items():
+            df = table_dfs[table_name]
+
+            # convert all foreign keys
+            for fk_def in table_schema.foreign_keys:
+                ref_df = table_dfs[fk_def.ref_table]
+                id = table_name, "-".join(fk_def.columns), fk_def.ref_table
+                try:
+                    data[id].edge_index = self._fk_to_index(fk_def, df, ref_df)
+                except Exception as e:
+                    warnings.warn(f"Failed to join on foreign key {id}. Reason: {e}")
+
+            col_to_stype = infer_df_stype(df)
+            print(table_name, col_to_stype)
+
+            dataset = Dataset(
+                df=df,
+                col_to_stype=col_to_stype,
+                col_to_text_embedder_cfg=self.text_embedder_cfg,
+            ).materialize(path=os.path.join(self.root_dir, "materialized"))
+
+            data[table_name].tf = dataset.tensor_frame
+            data[table_name].col_stats = dataset.col_stats
+
+            column_defs = self.converter.convert_table(table_name, df, inplace=True)
+            df.fillna(0.0, inplace=True)
+
+            # set HeteroData features (with target now removed)
+            data[table_name].x = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
+            this_labels = [str(col) for col in df.columns]
+            out_column_defs[table_name] = [
+                column_defs[column_name] for column_name in this_labels
+            ]
+
+        # add reverse edges
+        data: HeteroData = T.ToUndirected()(data)
+
+        return data, out_column_defs
 
     @classmethod
     def get_url(cls, dataset: CTUDatasetName) -> str:
@@ -127,6 +244,40 @@ class CTUDataset(Dataset):
 
         return Database(tables), schema
 
+    def _fk_to_index(
+        self,
+        fk_def: ForeignKeyDef,
+        table: pd.DataFrame,
+        ref_table: pd.DataFrame,
+        device=None,
+    ) -> torch.Tensor:
+        assert isinstance(table.index, pd.RangeIndex)
+        assert isinstance(ref_table.index, pd.RangeIndex)
+
+        # keep just the index columns
+        table = table[fk_def.columns].copy()
+        ref_table = ref_table[fk_def.ref_columns].copy()
+
+        table.index.name = "__pandas_index"
+        ref_table.index.name = "__pandas_index"
+        table.reset_index(inplace=True)
+        ref_table.reset_index(inplace=True)
+
+        out = pd.merge(
+            left=table,
+            right=ref_table,
+            how="inner",
+            left_on=fk_def.columns,
+            right_on=fk_def.ref_columns,
+        )
+
+        return (
+            torch.from_numpy(out[["__pandas_index_x", "__pandas_index_y"]].to_numpy())
+            .t()
+            .contiguous()
+            .to(device)
+        )
+
     def __save_schema(self, path: str):
         with open(path, "wb") as f:
             pickle.dump(self.schema, f, pickle.HIGHEST_PROTOCOL)
@@ -169,3 +320,12 @@ MARIADB_TO_PANDAS = {
     "MEDIUMBLOB": "object",
     "LONGBLOB": "object",
 }
+
+
+if __name__ == "__main__":
+    dataset = CTUDataset(name="Chess", force_remake=False)
+    print(dataset.db.table_dict)
+    # task = dataset.get_task()
+
+    # print(task.train_table.df)
+    # print(dataset.db.table_dict)
