@@ -1,11 +1,10 @@
-import sys, os
-
-# sys.path.append(os.getcwd())
+from collections import OrderedDict
+import json
+import os
+from pathlib import Path
+import warnings
 
 from typing import Dict, List, Optional, Tuple, Type
-from collections import OrderedDict
-import pickle
-import warnings
 
 import numpy as np
 import pandas as pd
@@ -26,35 +25,17 @@ from torch_frame.data import Dataset
 from torch_frame.utils import infer_df_stype
 
 from relbench.data import Dataset as RelBenchDataset, BaseTask, Database, Table
-
-from db_transformer.data.converter import (
-    CategoricalConverter,
-    ConverterList,
-    DataFrameConverter,
-    DateConverter,
-    DateTimeConverter,
-    IdentityConverter,
-    OmitConverter,
-    TimeConverter,
-    TimestampConverter,
-    SimpleDataFrameConverter,
-    PerTypeSeriesConverter,
-    SeriesConverter,
+from db_transformer.data.relbench.utils import (
+    merge_schema_infered_stype,
 )
 from db_transformer.db.db_inspector import DBInspector
 from db_transformer.db.schema_autodetect import SchemaAnalyzer
 from db_transformer.schema.schema import ColumnDef, ForeignKeyDef, Schema
-from db_transformer.schema.columns import (
-    CategoricalColumnDef,
-    DateColumnDef,
-    DateTimeColumnDef,
-    NumericColumnDef,
-    TimeColumnDef,
-)
 from db_transformer.data.relbench.ctu_repository_defauts import (
     CTUDatasetName,
     CTU_REPOSITORY_DEFAULTS,
 )
+from db_transformer.helpers.objectpickle import serialize, deserialize
 
 
 from db_transformer.data.relbench.ctu_task import CTUTask
@@ -71,17 +52,6 @@ class GloveTextEmbedding:
 
 
 class CTUDataset(RelBenchDataset):
-    the_converters: OrderedDict[Optional[Type[ColumnDef]], SeriesConverter] = OrderedDict(
-        (
-            (CategoricalColumnDef, CategoricalConverter()),
-            (NumericColumnDef, IdentityConverter()),
-            (DateColumnDef, DateConverter()),
-            (DateTimeColumnDef, DateTimeConverter()),
-            (TimeColumnDef, TimeConverter()),
-            (None, OmitConverter()),
-        )
-    )
-
     def __init__(
         self,
         name: CTUDatasetName,
@@ -97,35 +67,41 @@ class CTUDataset(RelBenchDataset):
         self.data_dir = data_dir
 
         db = None
-        self.root_dir = os.path.join(data_dir, name)
 
-        db_dir = os.path.join(self.root_dir, "db")
+        Path(self.root_dir).mkdir(parents=True, exist_ok=True)
 
-        if not force_remake and os.path.exists(db_dir):
-            self.schema = self.__load_schema(os.path.join(db_dir, "schema.pickle"))
-            db = Database.load(db_dir)
+        if not force_remake and os.path.exists(self.db_dir):
+            self.schema = self._load_schema()
+            db = Database.load(self.db_dir)
             if len(db.table_dict) == 0:
                 db = None
 
         if db == None:
             db, self.schema = self.make_db(name)
             if save_db:
-                db.save(db_dir)
-                self.__save_schema(os.path.join(db_dir, "schema.pickle"))
+                db.save(self.db_dir)
+                self._save_schema()
 
         if tasks == None:
             tasks = [CTUTask]
-
-        self.converter = SimpleDataFrameConverter(
-            series_converter=PerTypeSeriesConverter(*self.the_converters.items()),
-            schema=self.schema,
-        )
 
         self.text_embedder_cfg = TextEmbedderConfig(
             text_embedder=GloveTextEmbedding(), batch_size=32
         )
 
-        super().__init__(db, pd.Timestamp.today(), pd.Timestamp.today(), 0, tasks)
+        super().__init__(db, pd.Timestamp.today(), pd.Timestamp.today(), tasks)
+
+    @property
+    def root_dir(self):
+        return os.path.join(self.data_dir, self.name)
+
+    @property
+    def db_dir(self):
+        return os.path.join(self.root_dir, "db")
+
+    @property
+    def schema_path(self):
+        return os.path.join(self.db_dir, "schema.json")
 
     def validate_and_correct_db(self):
         return
@@ -143,6 +119,9 @@ class CTUDataset(RelBenchDataset):
             table_name: table.df for table_name, table in self.db.table_dict.items()
         }
 
+        materialized_dir = os.path.join(self.root_dir, "materialized")
+        Path(materialized_dir).mkdir(parents=True, exist_ok=True)
+
         out_column_defs: Dict[str, List[ColumnDef]] = {}
         for table_name, table_schema in self.schema.items():
             df = table_dfs[table_name]
@@ -157,26 +136,16 @@ class CTUDataset(RelBenchDataset):
                     warnings.warn(f"Failed to join on foreign key {id}. Reason: {e}")
 
             col_to_stype = infer_df_stype(df)
-            print(table_name, col_to_stype)
+            col_to_stype = merge_schema_infered_stype(self.schema[table_name], col_to_stype)
 
             dataset = Dataset(
                 df=df,
                 col_to_stype=col_to_stype,
                 col_to_text_embedder_cfg=self.text_embedder_cfg,
-            ).materialize(path=os.path.join(self.root_dir, "materialized"))
+            ).materialize(path=os.path.join(materialized_dir, table_name))
 
             data[table_name].tf = dataset.tensor_frame
             data[table_name].col_stats = dataset.col_stats
-
-            column_defs = self.converter.convert_table(table_name, df, inplace=True)
-            df.fillna(0.0, inplace=True)
-
-            # set HeteroData features (with target now removed)
-            data[table_name].x = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
-            this_labels = [str(col) for col in df.columns]
-            out_column_defs[table_name] = [
-                column_defs[column_name] for column_name in this_labels
-            ]
 
         # add reverse edges
         data: HeteroData = T.ToUndirected()(data)
@@ -278,13 +247,13 @@ class CTUDataset(RelBenchDataset):
             .to(device)
         )
 
-    def __save_schema(self, path: str):
-        with open(path, "wb") as f:
-            pickle.dump(self.schema, f, pickle.HIGHEST_PROTOCOL)
+    def _save_schema(self):
+        with open(self.schema_path, "w+") as f:
+            json.dump(serialize(self.schema), f, indent=4)
 
-    def __load_schema(self, path: str) -> Schema:
-        with open(path, "rb") as f:
-            return pickle.load(f)
+    def _load_schema(self) -> Schema:
+        with open(self.schema_path, "r") as f:
+            return deserialize(json.load(f))
 
 
 MARIADB_TO_PANDAS = {
@@ -320,12 +289,3 @@ MARIADB_TO_PANDAS = {
     "MEDIUMBLOB": "object",
     "LONGBLOB": "object",
 }
-
-
-if __name__ == "__main__":
-    dataset = CTUDataset(name="Chess", force_remake=False)
-    print(dataset.db.table_dict)
-    # task = dataset.get_task()
-
-    # print(task.train_table.df)
-    # print(dataset.db.table_dict)
