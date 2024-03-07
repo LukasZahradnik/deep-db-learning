@@ -166,7 +166,7 @@ class SchemaAnalyzer:
     If the fraction is below this threshold, marks the column as categorical.
     """
 
-    FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.95
+    FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.2
     """
     The fraction of distinct values to total count of non-null values,
     which decides (in some situations) that type cannot be categorical.
