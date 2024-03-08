@@ -123,6 +123,8 @@ class CTUDataset:
                 self.schema[table_name], col_to_stype
             )
 
+            print(f"Table {table_name} has stypes: {col_to_stype}")
+
             dataset = Dataset(
                 df=df,
                 col_to_stype=col_to_stype,
