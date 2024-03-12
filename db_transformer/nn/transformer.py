@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.nn import HeteroConv, Linear, MessagePassing
 
-from db_transformer.data.embedder import TableEmbedder, NumEmbedder, CatEmbedder
+from db_transformer.nn.embedder import TableEmbedder, NumEmbedder, CatEmbedder
 from db_transformer.schema import NumericColumnDef, CategoricalColumnDef
 
 

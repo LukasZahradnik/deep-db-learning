@@ -8,6 +8,8 @@ from torch_frame import stype, TensorFrame
 from torch_frame.data import StatType
 from torch_frame.nn import TabTransformer
 
+__ALL__ = ["TabTransformerEmbedder"]
+
 
 class TabTransformerTableEmbedder(torch.nn.Module):
     def __init__(

@@ -19,8 +19,7 @@ from db_transformer.data.dataset_defaults.fit_dataset_defaults import (
     FITDatasetDefaults,
     TaskType,
 )
-from db_transformer.data.embedder import CatEmbedder, NumEmbedder
-from db_transformer.data.embedder.embedders import SingleTableEmbedder
+from db_transformer.nn.embedder import SingleTableEmbedder, CatEmbedder, NumEmbedder
 from db_transformer.data.fit_dataset import FITRelationalDataset
 from db_transformer.data.utils import HeteroDataBuilder
 from db_transformer.helpers.timer import Timer
