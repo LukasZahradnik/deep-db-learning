@@ -94,7 +94,7 @@ class CTUDataset:
         return os.path.join(self.db_dir, "schema.json")
 
     def build_hetero_data(
-        self, device=None
+        self, device: str = None
     ) -> Tuple[HeteroData, Dict[str, List[ColumnDef]]]:
         data = HeteroData()
 
@@ -114,7 +114,7 @@ class CTUDataset:
                 ref_df = table_dfs[fk_def.ref_table]
                 id = table_name, "-".join(fk_def.columns), fk_def.ref_table
                 try:
-                    data[id].edge_index = self._fk_to_index(fk_def, df, ref_df)
+                    data[id].edge_index = self._fk_to_index(fk_def, df, ref_df, device)
                 except Exception as e:
                     warnings.warn(f"Failed to join on foreign key {id}. Reason: {e}")
 
@@ -134,9 +134,9 @@ class CTUDataset:
                     if table_name == self.defaults.target_table
                     else None
                 ),
-            ).materialize(path=os.path.join(materialized_dir, table_name))
+            ).materialize(device, path=os.path.join(materialized_dir, table_name))
 
-            data[table_name].tf = dataset.tensor_frame
+            data[table_name].tf = dataset.tensor_frame.to(device)
             data[table_name].col_stats = dataset.col_stats
             if table_name == self.defaults.target_table:
                 data[table_name].y = dataset.tensor_frame.y

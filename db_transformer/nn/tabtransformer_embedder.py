@@ -48,7 +48,7 @@ class TabTransformerTableEmbedder(torch.nn.Module):
 
     def forward(self, tf: TensorFrame) -> torch.Tensor:
         if self.no_valid_col:
-            return torch.ones((tf.num_rows, self.out_channels))
+            return torch.ones((tf.num_rows, self.out_channels)).to(tf.device)
         return self.tabtransformer(tf)
 
 
