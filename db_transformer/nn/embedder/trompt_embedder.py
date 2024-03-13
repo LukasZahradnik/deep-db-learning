@@ -6,37 +6,33 @@ from torch_geometric.typing import NodeType
 
 from torch_frame import stype, TensorFrame
 from torch_frame.data import StatType
-from torch_frame.nn import TabTransformer
+from torch_frame.nn import Trompt
 
-__ALL__ = ["TabTransformerEmbedder", "TabTransformerTableEmbedder"]
+__ALL__ = ["TromptEmbedder", "TromptTableEmbedder"]
 
 
-class TabTransformerTableEmbedder(torch.nn.Module):
+class TromptTableEmbedder(torch.nn.Module):
     def __init__(
         self,
         channels: int,
         out_channels: int,
         num_layers: int,
-        num_heads: int,
-        attn_dropout: float,
-        ffn_dropout: float,
+        num_prompts: int,
         col_stats: Dict[str, Dict[StatType, Any]],
         col_names_dict: Dict[stype, List[str]],
     ) -> None:
         super().__init__()
-
         self.valid_stypes = [stype.categorical, stype.numerical]
 
         self.out_channels = out_channels
 
-        self.embedder = TabTransformer(
+        self.col_names_dict = col_names_dict
+
+        self.embedder = Trompt(
             channels=channels,
             out_channels=out_channels,
+            num_prompts=num_prompts,
             num_layers=num_layers,
-            num_heads=num_heads,
-            encoder_pad_size=2,
-            attn_dropout=attn_dropout,
-            ffn_dropout=ffn_dropout,
             col_stats=col_stats,
             col_names_dict=col_names_dict,
         )
@@ -51,27 +47,24 @@ class TabTransformerTableEmbedder(torch.nn.Module):
         return self.embedder(tf)
 
 
-class TabTransformerEmbedder(torch.nn.Module):
+class TromptEmbedder(torch.nn.Module):
     def __init__(
         self,
         table_col_stats: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
         table_col_names_dict: Dict[NodeType, Dict[stype, List[str]]],
         embed_dim: int,
         num_layers: int,
-        num_heads: int,
-        attn_dropout: float,
+        num_prompts: int,
     ) -> None:
         super().__init__()
 
         self.embedder = torch.nn.ModuleDict(
             {
-                table_name: TabTransformerTableEmbedder(
+                table_name: TromptTableEmbedder(
                     channels=embed_dim,
                     out_channels=embed_dim,
+                    num_prompts=num_prompts,
                     num_layers=num_layers,
-                    num_heads=num_heads,
-                    attn_dropout=attn_dropout,
-                    ffn_dropout=0,
                     col_stats=table_col_stats[table_name],
                     col_names_dict=table_col_names_dict[table_name],
                 )

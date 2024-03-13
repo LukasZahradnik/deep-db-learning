@@ -4,24 +4,25 @@ import torch
 
 from torch_geometric.typing import NodeType
 
-from torch_frame import stype, TensorFrame
+from torch_frame import stype, TensorFrame, NAStrategy
 from torch_frame.data import StatType
-from torch_frame.nn import TabTransformer
+from torch_frame.nn import EmbeddingEncoder, ExcelFormer, ExcelFormerEncoder
 
-__ALL__ = ["TabTransformerEmbedder", "TabTransformerTableEmbedder"]
+__ALL__ = ["ExcelFormerEmbedder", "ExcelFormerTableEmbedder"]
 
 
-class TabTransformerTableEmbedder(torch.nn.Module):
+class ExcelFormerTableEmbedder(torch.nn.Module):
     def __init__(
         self,
         channels: int,
         out_channels: int,
         num_layers: int,
         num_heads: int,
-        attn_dropout: float,
-        ffn_dropout: float,
         col_stats: Dict[str, Dict[StatType, Any]],
         col_names_dict: Dict[stype, List[str]],
+        diam_dropout: float,
+        aium_dropout: float,
+        residual_dropout: float,
     ) -> None:
         super().__init__()
 
@@ -29,16 +30,26 @@ class TabTransformerTableEmbedder(torch.nn.Module):
 
         self.out_channels = out_channels
 
-        self.embedder = TabTransformer(
-            channels=channels,
+        self.embedder = ExcelFormer(
+            in_channels=channels,
             out_channels=out_channels,
+            num_cols=len(col_stats.keys()),
             num_layers=num_layers,
             num_heads=num_heads,
-            encoder_pad_size=2,
-            attn_dropout=attn_dropout,
-            ffn_dropout=ffn_dropout,
             col_stats=col_stats,
             col_names_dict=col_names_dict,
+            stype_encoder_dict={
+                stype.numerical: ExcelFormerEncoder(
+                    out_channels, na_strategy=NAStrategy.MEAN
+                ),
+                stype.categorical: EmbeddingEncoder(
+                    out_channels,
+                    na_strategy=NAStrategy.MOST_FREQUENT,
+                ),
+            },
+            diam_dropout=diam_dropout,
+            aium_dropout=aium_dropout,
+            residual_dropout=residual_dropout,
         )
         self.no_valid_col = True
         for _stype in self.valid_stypes:
@@ -51,7 +62,7 @@ class TabTransformerTableEmbedder(torch.nn.Module):
         return self.embedder(tf)
 
 
-class TabTransformerEmbedder(torch.nn.Module):
+class ExcelFormerEmbedder(torch.nn.Module):
     def __init__(
         self,
         table_col_stats: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
@@ -59,21 +70,22 @@ class TabTransformerEmbedder(torch.nn.Module):
         embed_dim: int,
         num_layers: int,
         num_heads: int,
-        attn_dropout: float,
+        diam_dropout: float,
     ) -> None:
         super().__init__()
 
         self.embedder = torch.nn.ModuleDict(
             {
-                table_name: TabTransformerTableEmbedder(
+                table_name: ExcelFormerTableEmbedder(
                     channels=embed_dim,
                     out_channels=embed_dim,
                     num_layers=num_layers,
                     num_heads=num_heads,
-                    attn_dropout=attn_dropout,
-                    ffn_dropout=0,
                     col_stats=table_col_stats[table_name],
                     col_names_dict=table_col_names_dict[table_name],
+                    diam_dropout=diam_dropout,
+                    aium_dropout=0,
+                    residual_dropout=0,
                 )
                 for table_name in table_col_stats.keys()
             }
