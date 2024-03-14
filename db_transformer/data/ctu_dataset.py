@@ -27,6 +27,7 @@ from relbench.data import Database, Table
 
 from db_transformer.db.db_inspector import DBInspector
 from db_transformer.db.schema_autodetect import SchemaAnalyzer
+from db_transformer.helpers.progress import wrap_progress
 from db_transformer.schema import columns, ColumnDef, ForeignKeyDef, Schema, TableSchema
 from db_transformer.data.dataset_defaults.ctu_repository_defauts import (
     CTUDatasetName,
@@ -42,7 +43,7 @@ class GloveTextEmbedding:
         )
 
     def __call__(self, sentences: List[str]) -> torch.Tensor:
-        return torch.from_numpy(self.model.encode(sentences))
+        return torch.from_numpy(self.model.encode(sentences, show_progress_bar=False))
 
 
 class CTUDataset:
@@ -93,9 +94,7 @@ class CTUDataset:
     def schema_path(self):
         return os.path.join(self.db_dir, "schema.json")
 
-    def build_hetero_data(
-        self, device: str = None
-    ) -> Tuple[HeteroData, Dict[str, List[ColumnDef]]]:
+    def build_hetero_data(self, device: str = None) -> HeteroData:
         data = HeteroData()
 
         # get all tables
@@ -106,7 +105,9 @@ class CTUDataset:
         materialized_dir = os.path.join(self.root_dir, "materialized")
         Path(materialized_dir).mkdir(parents=True, exist_ok=True)
 
-        for table_name, table_schema in self.schema.items():
+        for table_name, table_schema in wrap_progress(
+            self.schema.items(), verbose=True, desc="Building data"
+        ):
             df = table_dfs[table_name]
 
             # convert all foreign keys
@@ -167,7 +168,7 @@ class CTUDataset:
 
         inspector = DBInspector(remote_conn)
 
-        analyzer = SchemaAnalyzer(remote_conn)
+        analyzer = SchemaAnalyzer(remote_conn, verbose=True)
         schema = analyzer.guess_schema()
 
         remote_md = MetaData()
@@ -175,7 +176,9 @@ class CTUDataset:
 
         tables = {}
 
-        for table_name in inspector.get_tables():
+        for table_name in wrap_progress(
+            inspector.get_tables(), verbose=True, desc="Downloading tables"
+        ):
             pk = inspector.get_primary_key(table_name)
             pkey_col = list(pk)[0] if len(pk) == 1 else None
 

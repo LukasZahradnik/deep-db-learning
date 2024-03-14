@@ -479,7 +479,7 @@ will receive the :py:class:`OmitColumnDef` type
         schema = Schema()
 
         for table_name in wrap_progress(
-            self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"
+            self.db_inspector.get_tables(), verbose=self._verbose, desc="Analyzing schema"
         ):
             column_defs = ColumnDefs()
             fks: List[ForeignKeyDef] = list(
