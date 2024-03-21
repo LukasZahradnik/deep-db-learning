@@ -79,7 +79,7 @@ class SingleTableEmbedder(torch.nn.Module):
         return out
 
 
-class TableEmbedder(torch.nn.Module):
+class MultiTableEmbedder(torch.nn.Module):
     def __init__(
         self,
         *column_embedders: Tuple[ColumnDefMatcherLike, Callable[[], ColumnEmbedder]],
