@@ -26,7 +26,5 @@ class CrossAttentionConv(MessagePassing):
         return self.propagate(edge_index, query=x, key=x, value=x)
 
     def message(self, query_i, key_j, value_j):
-        # key = torch.concat((key_i, key_j), dim=-2)
-        # value = torch.concat((value_i, value_j), dim=-2)
         x, _ = self.attn(query_i, key_j, value_j)
         return x

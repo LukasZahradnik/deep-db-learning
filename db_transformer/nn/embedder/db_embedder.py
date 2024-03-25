@@ -70,8 +70,11 @@ class DBEmbedder(torch.nn.Module):
         col_stats_per_table: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
         col_names_dict_per_table: Dict[NodeType, Dict[stype, List[str]]],
         stype_embedder_dict: Dict[stype, StypeEncoder] = None,
+        return_cols: bool = True,
     ) -> None:
         super().__init__()
+
+        self.return_cols = return_cols
 
         self.table_embedders = torch.nn.ModuleDict()
         for table_name in col_stats_per_table:
@@ -105,4 +108,8 @@ class DBEmbedder(torch.nn.Module):
             x, cols = self.table_embedders[table_name](tf)
             x_dict[table_name] = x
             cols_dict[table_name] = cols
+
+        if not self.return_cols:
+            return x_dict
+
         return x_dict, cols_dict
