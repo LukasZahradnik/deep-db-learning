@@ -91,7 +91,6 @@ class DBEmbedder(torch.nn.Module):
                     stype.numerical: LinearEncoder(
                         na_strategy=NAStrategy.MEAN,
                     ),
-                    stype.timestamp: TimestampEncoder(),
                 }
 
             self.table_embedders[table_name] = TableEmbedder(

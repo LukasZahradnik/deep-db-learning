@@ -9,11 +9,15 @@ class NodeApplied(torch.nn.Module):
         self,
         factory: Callable[[NodeType], torch.nn.Module],
         node_types: List[NodeType],
+        learnable: bool = True,
     ) -> None:
         super().__init__()
 
         self.node_types = node_types
-        self.items = torch.nn.ModuleDict({k: factory(k) for k in node_types})
+        if learnable:
+            self.items = torch.nn.ModuleDict({k: factory(k) for k in node_types})
+        else:
+            self.items = {k: factory(k) for k in node_types}
 
     def forward(self, x_dict: Dict[NodeType, torch.Tensor]) -> Dict[NodeType, torch.Tensor]:
         out_dict: Dict[NodeType, torch.Tensor] = {}
