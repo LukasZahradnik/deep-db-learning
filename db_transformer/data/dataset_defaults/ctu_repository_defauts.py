@@ -1,14 +1,16 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, Dict, Optional, Tuple, Union
+from typing import Callable, Literal, Dict, Optional, Tuple, Union
 
 from db_transformer.db.distinct_cnt_retrieval import DBDistinctCounter
 from db_transformer.db.schema_autodetect import BuiltinDBDistinctCounter
+from db_transformer.schema import Schema, ForeignKeyDef
 
 
 class TaskType(Enum):
     CLASSIFICATION = 1
     REGRESSION = 2
+    LINK_PREDICTION = 3
 
 
 @dataclass
@@ -18,7 +20,7 @@ class CTUDatasetDefault:
     target_id: str
     task: TaskType
     timestamp_column: Optional[str] = None
-    # schema_fixer: Optional[Callable[[Schema], None]] = None
+    schema_fixer: Optional[Callable[[Schema], None]] = None
     db_distinct_counter: Union[DBDistinctCounter, BuiltinDBDistinctCounter] = "db_distinct"
     force_collation: Optional[str] = None
 
@@ -33,7 +35,7 @@ CTUDatasetName = Literal[
     'Carcinogenesis', 'Chess', 'CiteSeer', 'ConsumerExpenditures', 'CORA', 
     'CraftBeer', 'Credit', 'cs', 'Dallas', 'DCG', 'Dunur', 'Elti', 'ErgastF1',
     'Facebook', 'financial', 'ftp', 'geneea', 'genes', 'Hepatitis_std', 'Hockey',
-    'imdb_ijs', 'imdb_MovieLens', 'KRK', 'legalActs', 'medical', 'Mondial',
+    'imdb_ijs', 'imdb_MovieLens', 'KRK', 'legalActs', 'Mondial',
     'Mooney_Family', 'MuskSmall', 'mutagenesis', 'nations', 'NBA', 'NCAA', 'Pima', 
     'PremierLeague', 'PTE', 'PubMed_Diabetes', 'Same_gen', 'SAP', 'SAT', 'Shakespeare', 
     'Student_loan', 'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'trains', 'university', 'UTube',
@@ -78,7 +80,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         timestamp_column="year",
         task=TaskType.REGRESSION,
     ),
-    "BasketballWomen": CTUDatasetDefault(
+    "Basketball_women": CTUDatasetDefault(
         target_table="teams",
         target_column="playoff",
         target_id="tmID, year",
@@ -128,7 +130,12 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_column="class_label",
         target_id="paper_id",
         task=TaskType.CLASSIFICATION,
-        # schema_fixer=fix_citeseer_schema
+        schema_fixer=lambda schema: schema.cites.foreign_keys.extend(
+            [
+                ForeignKeyDef(["cited_paper_id"], "paper", ["paper_id"]),
+                ForeignKeyDef(["citing_paper_id"], "paper", ["paper_id"]),
+            ]
+        ),
     ),
     "classicmodels": CTUDatasetDefault(
         target_table="payments",
@@ -220,7 +227,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_id="id",
         task=TaskType.CLASSIFICATION,
     ),
-    "Financial": CTUDatasetDefault(
+    "financial": CTUDatasetDefault(
         target_table="loan",
         target_column="status",
         target_id="account_id",
@@ -324,9 +331,9 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_table="uncle",
         target_column="?",
         target_id="name1, name2",
-        task=TaskType.CLASSIFICATION,
+        task=TaskType.LINK_PREDICTION,
     ),
-    "MovieLens": CTUDatasetDefault(
+    "imdb_MovieLens": CTUDatasetDefault(
         target_table="users",
         target_column="u_gender",
         target_id="userid",
@@ -377,7 +384,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_id="arg1",
         task=TaskType.CLASSIFICATION,
     ),
-    "PremiereLeague": CTUDatasetDefault(
+    "PremierLeague": CTUDatasetDefault(
         target_table="Matches",
         target_column="ResultOfTeamHome",
         target_id="MatchID",
@@ -472,7 +479,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_table="paragraphs",
         target_column="character_id",
         target_id="id",
-        task=TaskType.CLASSIFICATION,
+        task=TaskType.LINK_PREDICTION,
     ),
     "stats": CTUDatasetDefault(
         target_table="users",
@@ -493,6 +500,12 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_id="ID",
         timestamp_column="Examination Date",
         task=TaskType.REGRESSION,
+    ),
+    "Toxicology": CTUDatasetDefault(
+        target_table="molecule",
+        target_column="label",
+        target_id="molecule_id",
+        task=TaskType.CLASSIFICATION,
     ),
     "tpcc": CTUDatasetDefault(
         target_table="C_Customer",
@@ -553,7 +566,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_table="IMG_OBJ",
         target_column="OBJ_CLASS_ID",
         target_id="IMG_ID, OBJ_SAMPLE_ID",
-        task=TaskType.CLASSIFICATION,
+        task=TaskType.LINK_PREDICTION,
     ),
     "voc": CTUDatasetDefault(
         target_table="voyages",

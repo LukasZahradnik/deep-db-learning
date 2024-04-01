@@ -1,9 +1,10 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import warnings
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -21,7 +22,7 @@ from sentence_transformers import SentenceTransformer
 import torch_frame
 from torch_frame.config import TextEmbedderConfig
 from torch_frame.data import Dataset
-from torch_frame.utils import infer_df_stype
+from torch_frame.utils import infer_series_stype
 
 from relbench.data import Database, Table
 
@@ -77,9 +78,7 @@ class CTUDataset:
                 db.save(self.db_dir)
                 self._save_schema()
 
-        self.text_embedder_cfg = TextEmbedderConfig(
-            text_embedder=GloveTextEmbedding(), batch_size=32
-        )
+        self.text_embedder_cfg = TextEmbedderConfig(text_embedder=GloveTextEmbedding())
         self.db = db
 
     @property
@@ -94,7 +93,9 @@ class CTUDataset:
     def schema_path(self):
         return os.path.join(self.db_dir, "schema.json")
 
-    def build_hetero_data(self, device: str = None) -> HeteroData:
+    def build_hetero_data(
+        self, device: str = None, force_rematerilize: bool = False
+    ) -> HeteroData:
         data = HeteroData()
 
         # get all tables
@@ -103,6 +104,8 @@ class CTUDataset:
         }
 
         materialized_dir = os.path.join(self.root_dir, "materialized")
+        if force_rematerilize and os.path.exists(materialized_dir):
+            shutil.rmtree(materialized_dir)
         Path(materialized_dir).mkdir(parents=True, exist_ok=True)
 
         for table_name, table_schema in wrap_progress(
@@ -119,23 +122,53 @@ class CTUDataset:
                 except Exception as e:
                     warnings.warn(f"Failed to join on foreign key {id}. Reason: {e}")
 
-            col_to_stype = infer_df_stype(df)
-            col_to_stype = self._merge_schema_infered_stype(
-                self.schema[table_name], col_to_stype
+            col_to_stype = self._schema_to_stype_dict(self.schema[table_name])
+
+            target_col = (
+                self.defaults.target_column
+                if table_name == self.defaults.target_table
+                else None
             )
 
-            print(f"Table {table_name} has stypes: {col_to_stype}")
+            for col in df.columns:
+                if col not in col_to_stype:
+                    continue
+                if df[col].dtype.__str__().startswith("timedelta"):
+                    df[col] = df[col].dt.nanoseconds
 
-            dataset = Dataset(
-                df=df,
-                col_to_stype=col_to_stype,
-                col_to_text_embedder_cfg=self.text_embedder_cfg,
-                target_col=(
-                    self.defaults.target_column
-                    if table_name == self.defaults.target_table
-                    else None
-                ),
-            ).materialize(device, path=os.path.join(materialized_dir, table_name))
+            if len(col_to_stype) == 0 or (
+                len(col_to_stype) == 1 and target_col is not None
+            ):
+                col_to_stype["__filler"] = torch_frame.stype.categorical
+                df["__filler"] = 0
+
+            if target_col is not None and target_col not in col_to_stype:
+                col_to_stype[target_col] = infer_series_stype(df[target_col])
+
+            def __build_frame_dataset(table, col_to_stype):
+                return Dataset(
+                    df=table,
+                    col_to_stype=col_to_stype,
+                    col_to_text_embedder_cfg=self.text_embedder_cfg,
+                    target_col=target_col,
+                ).materialize(device, path=os.path.join(materialized_dir, table_name))
+
+            try:
+                dataset = __build_frame_dataset(df, col_to_stype)
+
+            except pd.errors.OutOfBoundsDatetime as e:
+                for col, _stype in col_to_stype.items():
+                    if _stype != torch_frame.stype.timestamp:
+                        continue
+                    df[col].loc[MAX_TIMESTAMP.date() < df[col]] = MAX_TIMESTAMP.date()
+                    df[col].loc[MIN_TIMESTAMP.date() > df[col]] = MIN_TIMESTAMP.date()
+
+                dataset = __build_frame_dataset(df, col_to_stype)
+
+            stype_to_col_str = "\n".join(
+                [f"\t{k}: {v}" for k, v in dataset.tensor_frame.col_names_dict.items()]
+            )
+            print(f"Table {table_name} has stypes:\n{stype_to_col_str}")
 
             data[table_name].tf = dataset.tensor_frame.to(device)
             data[table_name].col_stats = dataset.col_stats
@@ -168,7 +201,11 @@ class CTUDataset:
 
         inspector = DBInspector(remote_conn)
 
-        analyzer = SchemaAnalyzer(remote_conn, verbose=True)
+        analyzer = SchemaAnalyzer(
+            remote_conn,
+            verbose=True,
+            post_guess_schema_hook=CTU_REPOSITORY_DEFAULTS[dataset].schema_fixer,
+        )
         schema = analyzer.guess_schema()
 
         remote_md = MetaData()
@@ -242,15 +279,14 @@ class CTUDataset:
             .to(device)
         )
 
-    def _merge_schema_infered_stype(
-        self, table_schema: TableSchema, infered_stype: Dict[str, torch_frame.stype]
+    def _schema_to_stype_dict(
+        self, table_schema: TableSchema
     ) -> Dict[str, torch_frame.stype]:
         merged: Dict[str, torch_frame.stype] = {}
         for col_name, col_def in table_schema.columns.items():
             _stype = COLUMN_DEF_STYPE[type(col_def)]
-            if _stype is None:
-                _stype = infered_stype[col_name]
-            merged[col_name] = _stype
+            if _stype is not None:
+                merged[col_name] = _stype
         return merged
 
     def _save_schema(self):
@@ -262,6 +298,9 @@ class CTUDataset:
             return deserialize(json.load(f))
 
 
+MAX_TIMESTAMP = pd.Timestamp("2262-04-10")
+MIN_TIMESTAMP = pd.Timestamp("1677-09-23")
+
 COLUMN_DEF_STYPE: Dict[ColumnDef, torch_frame.stype] = {
     columns.CategoricalColumnDef: torch_frame.stype.categorical,
     columns.DateColumnDef: torch_frame.stype.timestamp,
@@ -269,6 +308,7 @@ COLUMN_DEF_STYPE: Dict[ColumnDef, torch_frame.stype] = {
     columns.NumericColumnDef: torch_frame.stype.numerical,
     columns.DurationColumnDef: torch_frame.stype.numerical,
     columns.TextColumnDef: torch_frame.stype.text_embedded,
+    columns.TimeColumnDef: torch_frame.stype.numerical,
     columns.OmitColumnDef: None,
 }
 
@@ -289,16 +329,16 @@ MARIADB_TO_PANDAS = {
     "FLOAT": pd.Float32Dtype(),
     "DOUBLE": pd.Float64Dtype(),
     "DECIMAL": pd.Float64Dtype(),
-    "DATE": "datetime64[ns]",
+    "DATE": "object",
     "TIME": "object",
-    "DATETIME": "datetime64[ns]",
-    "TIMESTAMP": "datetime64[ns]",
+    "DATETIME": "object",
+    "TIMESTAMP": "object",
     "CHAR": "string",
     "VARCHAR": "string",
     "TEXT": "string",
     "MEDIUMTEXT": "string",
     "LONGTEXT": "string",
-    "ENUM": "categorical",
+    "ENUM": pd.CategoricalDtype(),
     "SET": "object",
     "BINARY": "object",
     "VARBINARY": "object",
