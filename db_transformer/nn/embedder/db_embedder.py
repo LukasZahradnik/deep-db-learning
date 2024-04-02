@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Literal, Optional
 import warnings
 
 import torch
@@ -69,7 +69,7 @@ class DBEmbedder(torch.nn.Module):
         embed_dim: Union[int, Dict[NodeType, int]],
         col_stats_per_table: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
         col_names_dict_per_table: Dict[NodeType, Dict[stype, List[str]]],
-        stype_embedder_dict: Dict[stype, StypeEncoder] = None,
+        stype_encoder_dict: Optional[Dict[stype, StypeEncoder]] = None,
         return_cols: bool = True,
     ) -> None:
         super().__init__()
@@ -82,7 +82,7 @@ class DBEmbedder(torch.nn.Module):
                 embed_dim[table_name] if isinstance(embed_dim, dict) else embed_dim
             )
 
-            table_stype_embedder_dict = deepcopy(stype_embedder_dict)
+            table_stype_embedder_dict = deepcopy(stype_encoder_dict)
             if table_stype_embedder_dict is None:
                 table_stype_embedder_dict = {
                     stype.categorical: EmbeddingEncoder(
