@@ -4,7 +4,7 @@ from typing import Callable, List, Dict, Union, Optional, Any, Tuple
 import torch
 from torch.nn import functional as F
 
-from torch_geometric.nn import Sequential, conv
+from torch_geometric.nn import HeteroConv, Sequential
 from torch_geometric.typing import EdgeType, NodeType
 
 import torch_frame
@@ -19,6 +19,8 @@ from db_transformer.nn import (
     PositionalEncoding,
 )
 
+AggrFunction = Callable[[torch.Tensor], torch.Tensor]
+
 
 class BlueprintModel(torch.nn.Module):
     def __init__(
@@ -32,11 +34,16 @@ class BlueprintModel(torch.nn.Module):
         positional_encoding: Optional[bool] = True,
         num_gnn_layers: Optional[int] = 1,
         table_transform: Optional[
-            Union[torch.nn.Module, Callable[[int], torch.nn.Module]]
+            Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
         ] = None,
         table_combination: Optional[
             Union[torch.nn.Module, Callable[[int, str], torch.nn.Module]]
         ] = None,
+        decoder_aggregation: Optional[AggrFunction] = torch.nn.Identity(),
+        decoder: Optional[
+            Union[torch.nn.Module, Callable[[List[str]], torch.nn.Module]]
+        ] = None,
+        output_activation: Optional[torch.nn.Module] = None,
         positional_encoding_dropout: Optional[float] = 0.0,
         table_transform_dropout: Optional[float] = 0.0,
         table_combination_dropout: Optional[float] = 0.0,
@@ -94,19 +101,18 @@ class BlueprintModel(torch.nn.Module):
 
         self.embedder = Sequential("tf_dict", embedder_layers)
 
-        if table_combination is None:
-            table_combination = CrossAttentionConv(embed_dim, 4)
-        is_combination_module = isinstance(table_combination, torch.nn.Module)
-
         layers: List[Tuple[str, torch.nn.Module]] = []
         for i in range(num_gnn_layers):
             if table_transform is not None:
                 layers.append(
                     (
-                        (
-                            copy.deepcopy(table_transform)
-                            if isinstance(table_transform, torch.nn.Module)
-                            else table_transform(i)
+                        NodeApplied(
+                            lambda node: (
+                                copy.deepcopy(table_transform)
+                                if isinstance(table_transform, torch.nn.Module)
+                                else table_transform(i, node, self.embedded_cols[node])
+                            ),
+                            self.node_types,
                         ),
                         f"x_dict_{i} -> x_dict",
                     )
@@ -128,6 +134,7 @@ class BlueprintModel(torch.nn.Module):
                                 lambda _: lambda x1, x2: x1 + x2,
                                 self.node_types,
                                 learnable=False,
+                                dynamic_args=True,
                             ),
                             f"x_dict_{i}, x_dict -> x_dict",
                         )
@@ -144,7 +151,9 @@ class BlueprintModel(torch.nn.Module):
                             "x_dict -> x_dict",
                         )
                     )
-
+            if table_combination is None:
+                table_combination = CrossAttentionConv(embed_dim, 4)
+            is_combination_module = isinstance(table_combination, torch.nn.Module)
             convs = {
                 edge_type: (
                     copy.deepcopy(table_combination)
@@ -154,7 +163,7 @@ class BlueprintModel(torch.nn.Module):
                 for edge_type in self.edge_types
             }
 
-            layers.append((conv.HeteroConv(convs), f"x_dict, edge_dict -> x_dict_{i+1}"))
+            layers.append((HeteroConv(convs), f"x_dict, edge_dict -> x_dict_{i+1}"))
 
             if table_combination_dropout > 0:
                 layers.append(
@@ -174,6 +183,7 @@ class BlueprintModel(torch.nn.Module):
                             lambda _: lambda x1, x2: x1 + x2,
                             self.node_types,
                             learnable=False,
+                            dynamic_args=True,
                         ),
                         f"x_dict_{i+1}, x_dict -> x_dict_{i+1}",
                     )
@@ -194,10 +204,19 @@ class BlueprintModel(torch.nn.Module):
 
         self.hetero_gnn = Sequential("x_dict_0, edge_dict", layers)
 
-        self.out_transform = torch.nn.Linear(
-            embed_dim,
-            len(col_stats_per_table[self.target_table][self.target_col][StatType.COUNT][0]),
-        )
+        self.decoder_aggregation = decoder_aggregation
+
+        self.decoder = torch.nn.Sequential()
+        if decoder is not None:
+
+            self.decoder.append(
+                decoder
+                if isinstance(decoder, torch.nn.Module)
+                else decoder(self.embedded_cols[self.target_table])
+            )
+
+        if output_activation is not None:
+            self.decoder.append(output_activation)
 
     def forward(
         self,
@@ -210,6 +229,8 @@ class BlueprintModel(torch.nn.Module):
 
         x_target = x_dict[self.target_table]
 
-        x_target = self.out_transform(x_target.sum(dim=-2))
+        x_target = self.decoder_aggregation(x_target)
 
-        return torch.softmax(x_target, dim=-1)
+        x_target = self.decoder(x_target)
+
+        return x_target
