@@ -113,6 +113,9 @@ class CTUDataset:
         ):
             df = table_dfs[table_name]
 
+            if df.empty:
+                continue
+
             # convert all foreign keys
             for fk_def in table_schema.foreign_keys:
                 ref_df = table_dfs[fk_def.ref_table]
@@ -204,6 +207,8 @@ class CTUDataset:
         analyzer = SchemaAnalyzer(
             remote_conn,
             verbose=True,
+            target=CTU_REPOSITORY_DEFAULTS[dataset].target,
+            target_type=CTU_REPOSITORY_DEFAULTS[dataset].task.to_type(),
             post_guess_schema_hook=CTU_REPOSITORY_DEFAULTS[dataset].schema_fixer,
         )
         schema = analyzer.guess_schema()

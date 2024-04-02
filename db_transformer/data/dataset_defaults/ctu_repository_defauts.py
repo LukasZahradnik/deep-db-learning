@@ -12,6 +12,14 @@ class TaskType(Enum):
     REGRESSION = 2
     LINK_PREDICTION = 3
 
+    def to_type(self) -> str:
+        if self.name == "CLASSIFICATION":
+            return "categorical"
+        elif self.name == "REGRESSION":
+            return "numeric"
+        else:
+            return "edge_type"
+
 
 @dataclass
 class CTUDatasetDefault:
@@ -31,15 +39,18 @@ class CTUDatasetDefault:
 
 # fmt: off
 CTUDatasetName = Literal[
-    'Accidents', 'Airline', 'Atherosclerosis', 'Basketball_women', 'Bupa', 
-    'Carcinogenesis', 'Chess', 'CiteSeer', 'ConsumerExpenditures', 'CORA', 
-    'CraftBeer', 'Credit', 'cs', 'Dallas', 'DCG', 'Dunur', 'Elti', 'ErgastF1',
-    'Facebook', 'financial', 'ftp', 'geneea', 'genes', 'Hepatitis_std', 'Hockey',
-    'imdb_ijs', 'imdb_MovieLens', 'KRK', 'legalActs', 'Mondial',
-    'Mooney_Family', 'MuskSmall', 'mutagenesis', 'nations', 'NBA', 'NCAA', 'Pima', 
-    'PremierLeague', 'PTE', 'PubMed_Diabetes', 'Same_gen', 'SAP', 'SAT', 'Shakespeare', 
-    'Student_loan', 'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'trains', 'university', 'UTube',
-    'UW_std', 'VisualGenome', 'voc', 'WebKP', 'world'
+    'Accidents', 'AdventureWorks2014', 'Airline', 'Atherosclerosis', 'Basketball_men',
+    'Basketball_women', 'Biodegradability', 'Bupa', 'Carcinogenesis', 'ccs', 'CDESchools',
+    'Chess', 'CiteSeer', 'classicmodels', 'ConsumerExpenditures', 'CORA', 'Countries',
+    'CraftBeer', 'Credit', 'cs', 'Dallas', 'DCG', 'Dunur', 'Elti', 'employee', 'ErgastF1',
+    'Facebook', 'financial', 'FNHK', 'ftp', 'geneea', 'genes', 'GOSales', 'Grants',
+    'Hepatitis_std', 'Hockey', 'imdb_ijs', 'KRK', 'lahman_2014', 'legalActs', 'Mesh',
+    'Mondial', 'Mooney_Family', 'imdb_MovieLens', 'MuskSmall', 'mutagenesis', 'nations',
+    'NBA', 'NCAA', 'northwind', 'Pima', 'PremierLeague', 'PTC', 'PTE', 'PubMed_Diabetes',
+    'pubs', 'Pyrimidine', 'restbase', 'sakila', 'SalesDB', 'Same_gen', 'SAP', 'SAT',
+    'Seznam', 'SFScores', 'Shakespeare', 'stats', 'Student_loan',
+    'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'tpch', 'trains', 'Triazine', 'university',
+    'UTube', 'UW_std', 'VisualGenome', 'voc', 'Walmart', 'WebKP', 'world'
 ]
 # fmt: on
 
@@ -71,6 +82,13 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_column="PRICUMR",
         target_id="ICO",
         timestamp_column="ROKUMR",
+        task=TaskType.CLASSIFICATION,
+    ),
+    "AustralianFootball": CTUDatasetDefault(
+        target_table="matches",
+        target_column="target",
+        target_id="mid",
+        timestamp_column="start_dt",
         task=TaskType.CLASSIFICATION,
     ),
     "Basketball_men": CTUDatasetDefault(
@@ -339,6 +357,13 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_id="userid",
         task=TaskType.REGRESSION,
     ),
+    "medical": CTUDatasetDefault(
+        target_table="Examination",
+        target_column="Thrombosis",
+        target_id="ID",
+        timestamp_column="Examination Date",
+        task=TaskType.CLASSIFICATION,
+    ),
     "MuskSmall": CTUDatasetDefault(
         target_table="molecule",
         target_column="class",
@@ -493,13 +518,6 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_column="bool",
         target_id="name",
         task=TaskType.CLASSIFICATION,
-    ),
-    "Thrombosis": CTUDatasetDefault(
-        target_table="Examination",
-        target_column="Thrombosis",
-        target_id="ID",
-        timestamp_column="Examination Date",
-        task=TaskType.REGRESSION,
     ),
     "Toxicology": CTUDatasetDefault(
         target_table="molecule",
