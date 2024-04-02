@@ -166,7 +166,7 @@ class SchemaAnalyzer:
     If the fraction is below this threshold, marks the column as categorical.
     """
 
-    FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.95
+    FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD = 0.2
     """
     The fraction of distinct values to total count of non-null values,
     which decides (in some situations) that type cannot be categorical.
@@ -479,7 +479,7 @@ will receive the :py:class:`OmitColumnDef` type
         schema = Schema()
 
         for table_name in wrap_progress(
-            self.db_inspector.get_tables(), verbose=self._verbose, desc="Tables"
+            self.db_inspector.get_tables(), verbose=self._verbose, desc="Analyzing schema"
         ):
             column_defs = ColumnDefs()
             fks: List[ForeignKeyDef] = list(

@@ -231,8 +231,8 @@ def create_model(
         dataset_name=DEFAULT_DATASET_NAME,
         model_config: Optional[ModelConfig] = None,
         device=None):
-    from db_transformer.nn.db_gnn import DBGNN
-    from db_transformer.nn.transformer import DBTransformer
+    from db_transformer.nn.models.db_gnn import DBGNN
+    from db_transformer.nn.models.transformer import DBTransformer
 
     if model_config is None:
         model_config = ModelConfig()
