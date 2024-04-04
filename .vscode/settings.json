@@ -3,5 +3,8 @@
     "[python]": {
         "editor.defaultFormatter": "ms-python.black-formatter"
     },
-    "notebook.formatOnSave.enabled": true
+    "notebook.formatOnSave.enabled": true,
+    "editor.detectIndentation": false,
+    "editor.indentSize": "tabSize",
+    "editor.tabSize": 4,
 }
