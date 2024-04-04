@@ -4,7 +4,7 @@ __pycache__/
 processed/
 raw/
 
-results/
+ray_tune_results/
 logs/
 lightning_logs/
 torch-models/
