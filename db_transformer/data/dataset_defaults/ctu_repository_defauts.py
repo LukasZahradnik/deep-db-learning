@@ -39,18 +39,19 @@ class CTUDatasetDefault:
 
 # fmt: off
 CTUDatasetName = Literal[
-    'Accidents', 'AdventureWorks2014', 'Airline', 'Atherosclerosis', 'Basketball_men',
-    'Basketball_women', 'Biodegradability', 'Bupa', 'Carcinogenesis', 'ccs', 'CDESchools',
-    'Chess', 'CiteSeer', 'classicmodels', 'ConsumerExpenditures', 'CORA', 'Countries',
-    'CraftBeer', 'Credit', 'cs', 'Dallas', 'DCG', 'Dunur', 'Elti', 'employee', 'ErgastF1',
-    'Facebook', 'financial', 'FNHK', 'ftp', 'geneea', 'genes', 'GOSales', 'Grants',
-    'Hepatitis_std', 'Hockey', 'imdb_ijs', 'KRK', 'lahman_2014', 'legalActs', 'Mesh',
-    'Mondial', 'Mooney_Family', 'imdb_MovieLens', 'MuskSmall', 'mutagenesis', 'nations',
-    'NBA', 'NCAA', 'northwind', 'Pima', 'PremierLeague', 'PTC', 'PTE', 'PubMed_Diabetes',
-    'pubs', 'Pyrimidine', 'restbase', 'sakila', 'SalesDB', 'Same_gen', 'SAP', 'SAT',
-    'Seznam', 'SFScores', 'Shakespeare', 'stats', 'Student_loan',
-    'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'tpch', 'trains', 'Triazine', 'university',
-    'UTube', 'UW_std', 'VisualGenome', 'voc', 'Walmart', 'WebKP', 'world'
+    'Accidents', 'AdventureWorks2014', 'Airline', 'Atherosclerosis', 'AustralianFootball', 
+    'Basketball_men', 'Basketball_women', 'Biodegradability', 'Bupa', 'Carcinogenesis', 
+    'ccs', 'CDESchools', 'Chess', 'CiteSeer', 'classicmodels', 'ConsumerExpenditures',
+    'CORA', 'Countries', 'CraftBeer', 'Credit', 'cs', 'Dallas', 'DCG', 'Dunur', 'Elti',
+    'employee', 'ErgastF1', 'Facebook', 'financial', 'FNHK', 'ftp', 'geneea', 'genes',
+    'GOSales', 'Grants', 'Hepatitis_std', 'Hockey', 'imdb_ijs', 'KRK', 'lahman_2014',
+    'legalActs', 'Mesh', 'medical', 'Mondial', 'Mooney_Family', 'imdb_MovieLens',
+    'MuskSmall', 'mutagenesis', 'nations', 'NBA', 'NCAA', 'northwind', 'Pima',
+    'PremierLeague', 'PTC', 'PTE', 'PubMed_Diabetes', 'pubs', 'Pyrimidine', 'restbase',
+    'sakila', 'SalesDB', 'Same_gen', 'SAP', 'SAT', 'Seznam', 'SFScores', 'Shakespeare',
+    'stats', 'Student_loan', 'Toxicology', 'tpcc', 'tpcd', 'tpcds', 'tpch', 'trains',
+    'Triazine', 'university', 'UTube', 'UW_std', 'VisualGenome', 'voc', 'Walmart','WebKP',
+    'world'
 ]
 # fmt: on
 
@@ -316,7 +317,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_table="krk",
         target_column="class",
         target_id="id",
-        task=TaskType.REGRESSION,
+        task=TaskType.CLASSIFICATION,
     ),
     "lahman_2014": CTUDatasetDefault(
         target_table="salaries",
@@ -337,7 +338,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_table="mesh",
         target_column="num",
         target_id="name",
-        task=TaskType.REGRESSION,
+        task=TaskType.CLASSIFICATION,
     ),
     "Mondial": CTUDatasetDefault(
         target_table="target",
@@ -355,7 +356,7 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_table="users",
         target_column="u_gender",
         target_id="userid",
-        task=TaskType.REGRESSION,
+        task=TaskType.CLASSIFICATION,
     ),
     "medical": CTUDatasetDefault(
         target_table="Examination",
