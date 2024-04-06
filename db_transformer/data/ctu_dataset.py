@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,8 @@ import pandas as pd
 from sqlalchemy.engine import Connection, create_engine
 from sqlalchemy.schema import MetaData, Table as SQLTable
 from sqlalchemy.sql import select, text
+
+from sklearn.preprocessing import MultiLabelBinarizer
 
 import torch
 
@@ -76,6 +79,7 @@ class CTUDataset:
             db, self.schema = self.make_db(name)
             if save_db:
                 db.save(self.db_dir)
+                db = Database.load(self.db_dir)
                 self._save_schema()
 
         self.text_embedder_cfg = TextEmbedderConfig(text_embedder=GloveTextEmbedding())
@@ -138,6 +142,18 @@ class CTUDataset:
                     continue
                 if df[col].dtype.__str__().startswith("timedelta"):
                     df[col] = df[col].dt.nanoseconds
+                if (
+                    df[col].dtype.__str__().startswith("object")
+                    and col_to_stype[col] == torch_frame.stype.categorical
+                ):
+                    mlb = MultiLabelBinarizer()
+                    df = df.join(
+                        pd.DataFrame(mlb.fit_transform(df[col]), columns=mlb.classes_)
+                    )
+                    col_to_stype.pop(col)
+                    df.drop(columns=[col], inplace=True)
+                    for c in mlb.classes_:
+                        col_to_stype[c] = torch_frame.stype.categorical
 
             if len(col_to_stype) == 0 or (
                 len(col_to_stype) == 1 and target_col is not None
