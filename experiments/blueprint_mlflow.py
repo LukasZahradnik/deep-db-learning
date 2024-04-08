@@ -55,58 +55,13 @@ from db_transformer.data import (
     CTUDatasetName,
 )
 
+from .blueprint_instances.instances import create_blueprint_model
+
 DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 
 DEFAULT_EXPERIMENT_NAME = "deep-db-tests-pelesjak"
 
 RANDOM_SEED = 42
-
-
-def create_model(
-    target: Tuple[str, str], embed_dim: int, data: HeteroData
-) -> BlueprintModel:
-
-    return BlueprintModel(
-        target=target,
-        embed_dim=embed_dim,
-        col_stats_per_table=data.collect("col_stats"),
-        col_names_dict_per_table={
-            k: tf.col_names_dict for k, tf in data.collect("tf").items()
-        },
-        edge_types=list(data.collect("edge_index").keys()),
-        stype_encoder_dict={
-            stype.categorical: encoder.EmbeddingEncoder(
-                na_strategy=NAStrategy.MOST_FREQUENT,
-            ),
-            stype.numerical: encoder.LinearEncoder(
-                na_strategy=NAStrategy.MEAN,
-            ),
-            stype.embedding: EmbeddingTranscoder(in_channels=300),
-        },
-        positional_encoding=True,
-        num_gnn_layers=3,
-        table_transform=SelfAttention(embed_dim, 16),
-        table_transform_unique=True,
-        # table_transform=lambda i, node, cols: ExcelFormerConv(embed_dim, len(cols), 1),
-        table_combination=CrossAttentionConv(embed_dim, 4),
-        table_combination_unique=True,
-        # table_combination=conv.TransformerConv(embed_dim, embed_dim, heads=4, dropout=0.1, root_weight=False),
-        decoder_aggregation=lambda x: torch.reshape(x, (-1, math.prod(x.shape[1:]))),
-        decoder=lambda cols: torch.nn.Sequential(
-            torch.nn.Linear(
-                embed_dim * len(cols),
-                len(data[target[0]].col_stats[target[1]][StatType.COUNT][0]),
-            ),
-        ),
-        output_activation=torch.nn.Softmax(dim=-1),
-        positional_encoding_dropout=0.0,
-        table_transform_dropout=0.1,
-        table_combination_dropout=0.1,
-        table_transform_residual=False,
-        table_combination_residual=False,
-        table_transform_norm=False,
-        table_combination_norm=False,
-    )
 
 
 def prepare_run(config: tune.TuneConfig):
@@ -187,7 +142,7 @@ def train_model(config: tune.TuneConfig):
         )
 
         lightning_model = LightningWrapper(
-            create_model(target, config["embed_dim"], data).to(device),
+            create_blueprint_model("honza", dataset.defaults, data, config).to(device),
             dataset.defaults.target_table,
             lr=config["lr"],
             betas=config["betas"],
