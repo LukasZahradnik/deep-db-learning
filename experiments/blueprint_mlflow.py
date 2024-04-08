@@ -3,7 +3,7 @@ from datetime import datetime
 import math
 import os, sys
 
-sys.path.append("/home/jakub/Documents/ŠKOLA/Ing./Diplomka/deep-db-learning")
+sys.path.append(os.getcwd())
 
 from typing import List, Dict, Literal, Union, Optional, Any, Tuple, get_args
 
@@ -13,8 +13,7 @@ import numpy as np
 
 import torch
 
-from lightning import LightningModule, Trainer, Callback as LightningCallback
-from lightning.pytorch.loggers import MLFlowLogger
+import lightning as L
 
 from torch_geometric.data import HeteroData
 from torch_geometric.loader import NeighborLoader
@@ -45,210 +44,24 @@ from db_transformer.nn import (
     CrossAttentionConv,
     NodeApplied,
 )
+from db_transformer.nn.lightning import LightningWrapper
+from db_transformer.nn.lightning.callbacks import (
+    BestMetricsLoggerCallback,
+    MLFlowLoggerCallback,
+)
 from db_transformer.data import (
     CTUDataset,
     TaskType,
     CTUDatasetName,
-    CTU_REPOSITORY_DEFAULTS,
 )
+
+from .blueprint_instances.instances import create_blueprint_model
 
 DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 
 DEFAULT_EXPERIMENT_NAME = "deep-db-tests-pelesjak"
 
 RANDOM_SEED = 42
-
-
-class BestMetricsLoggerCallback(LightningCallback):
-    def __init__(
-        self,
-        monitor: str = "val_acc",
-        cmp: Literal["min", "max"] = "max",
-        metrics: Optional[Dict[str, str]] = None,
-        verbose: bool = True,
-    ) -> None:
-        if metrics is None:
-            metrics = {
-                "train_acc": "best_train_acc",
-                "val_acc": "best_val_acc",
-                "test_acc": "best_test_acc",
-                "train_loss": "best_train_loss",
-                "val_loss": "best_val_loss",
-                "test_loss": "best_test_loss",
-            }
-
-        self.monitor = monitor
-        self.cmp = cmp
-        self.metrics = metrics
-        self.best_value: Optional[float] = None
-        self.verbose = verbose
-
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        if self.monitor not in trainer.callback_metrics:
-            return
-
-        mon_value = trainer.callback_metrics[self.monitor].detach().cpu().item()
-
-        if self.best_value is not None and (
-            self.cmp == "min" and mon_value >= self.best_value
-        ):
-            return
-
-        if self.best_value is not None and (
-            self.cmp == "max" and mon_value <= self.best_value
-        ):
-            return
-
-        self.best_value = mon_value
-        for metric_name, log_as in self.metrics.items():
-            if metric_name not in trainer.callback_metrics:
-                continue
-            v = trainer.callback_metrics[metric_name].detach().cpu().item()
-            pl_module.log(log_as, v, prog_bar=self.verbose)
-
-
-class MLFlowLoggerCallback(LightningCallback):
-    def __init__(
-        self,
-        run_id: str,
-        mlflow_client: MlflowClient,
-        ray_session: Any,
-        metrics: Optional[List[str]] = None,
-    ) -> None:
-        self.run_id = run_id
-        self.mlflow_client = mlflow_client
-        self.ray_session = ray_session
-
-        if metrics is None:
-            metrics = [
-                "train_acc",
-                "best_train_acc",
-                "val_acc",
-                "best_val_acc",
-                "test_acc",
-                "best_test_acc",
-                "train_loss",
-                "best_train_loss",
-                "val_loss",
-                "best_val_loss",
-                "test_loss",
-                "best_test_loss",
-            ]
-        self.metrics = metrics
-
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        metric_dict = {}
-        mlflow_metrics = []
-        timestamp = int(datetime.now().timestamp() * 1000)
-
-        for metric_name in self.metrics:
-            if metric_name not in trainer.callback_metrics:
-                continue
-            metric_dict[metric_name] = (
-                trainer.callback_metrics[metric_name].detach().cpu().item()
-            )
-            mlflow_metrics.append(
-                mlflow.entities.Metric(
-                    metric_name, metric_dict[metric_name], timestamp, trainer.current_epoch
-                )
-            )
-
-        self.mlflow_client.log_batch(self.run_id, metrics=mlflow_metrics, synchronous=False)
-
-        self.ray_session.report(metric_dict)
-
-
-class LightningModel(LightningModule):
-    def __init__(
-        self,
-        model: BlueprintModel,
-        target_table: str,
-        lr: float = 0.0001,
-        betas: Tuple[float, float] = (0.9, 0.999),
-    ) -> None:
-        super().__init__()
-        self.model = model
-        self.target_table = target_table
-        self.lr = lr
-        self.betas = betas
-        self.loss_module = torch.nn.CrossEntropyLoss()
-
-    def forward(self, data: HeteroData):
-        out = self.model(data.collect("tf"), data.collect("edge_index", allow_empty=True))
-
-        target = data[self.target_table].y
-        loss = self.loss_module(out, target)
-        acc = (out.argmax(dim=-1) == target).type(torch.float).mean()
-        return loss, acc
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, betas=self.betas)
-
-    def training_step(self, batch):
-        loss, acc = self.forward(batch)
-        batch_size = batch[self.target_table].y.shape[0]
-        self.log("train_loss", loss, batch_size=batch_size, prog_bar=True)
-        self.log("train_acc", acc, batch_size=batch_size, prog_bar=True)
-        return loss
-
-    def validation_step(self, batch):
-        _, acc = self.forward(batch)
-        batch_size = batch[self.target_table].y.shape[0]
-
-        self.log("val_acc", acc, batch_size=batch_size, prog_bar=True)
-
-    def test_step(self, batch):
-        _, acc = self.forward(batch)
-        batch_size = batch[self.target_table].y.shape[0]
-
-        self.log("test_acc", acc, batch_size=batch_size, prog_bar=True)
-
-
-def create_model(
-    target: Tuple[str, str], embed_dim: int, data: HeteroData
-) -> BlueprintModel:
-
-    return BlueprintModel(
-        target=target,
-        embed_dim=embed_dim,
-        col_stats_per_table=data.collect("col_stats"),
-        col_names_dict_per_table={
-            k: tf.col_names_dict for k, tf in data.collect("tf").items()
-        },
-        edge_types=list(data.collect("edge_index").keys()),
-        stype_encoder_dict={
-            stype.categorical: encoder.EmbeddingEncoder(
-                na_strategy=NAStrategy.MOST_FREQUENT,
-            ),
-            stype.numerical: encoder.LinearEncoder(
-                na_strategy=NAStrategy.MEAN,
-            ),
-            stype.embedding: EmbeddingTranscoder(in_channels=300),
-        },
-        positional_encoding=True,
-        num_gnn_layers=3,
-        table_transform=SelfAttention(embed_dim, 16),
-        table_transform_unique=True,
-        # table_transform=lambda i, node, cols: ExcelFormerConv(embed_dim, len(cols), 1),
-        table_combination=CrossAttentionConv(embed_dim, 4),
-        table_combination_unique=True,
-        # table_combination=conv.TransformerConv(embed_dim, embed_dim, heads=4, dropout=0.1, root_weight=False),
-        decoder_aggregation=lambda x: torch.reshape(x, (-1, math.prod(x.shape[1:]))),
-        decoder=lambda cols: torch.nn.Sequential(
-            torch.nn.Linear(
-                embed_dim * len(cols),
-                len(data[target[0]].col_stats[target[1]][StatType.COUNT][0]),
-            ),
-        ),
-        output_activation=torch.nn.Softmax(dim=-1),
-        positional_encoding_dropout=0.0,
-        table_transform_dropout=0.1,
-        table_combination_dropout=0.1,
-        table_transform_residual=False,
-        table_combination_residual=False,
-        table_transform_norm=False,
-        table_combination_norm=False,
-    )
 
 
 def prepare_run(config: tune.TuneConfig):
@@ -328,14 +141,15 @@ def train_model(config: tune.TuneConfig):
             subgraph_type="bidirectional",
         )
 
-        lightning_model = LightningModel(
-            create_model(target, config["embed_dim"], data).to(device),
+        lightning_model = LightningWrapper(
+            create_blueprint_model("honza", dataset.defaults, data, config).to(device),
             dataset.defaults.target_table,
             lr=config["lr"],
             betas=config["betas"],
+            task_type=dataset.defaults.task,
         ).to(device)
 
-        trainer = Trainer(
+        trainer = L.Trainer(
             accelerator=device.type,
             devices=1,
             deterministic=True,

@@ -20,8 +20,6 @@ import torch
 import torch_geometric.transforms as T
 from torch_geometric.data import HeteroData
 
-from sentence_transformers import SentenceTransformer
-
 import torch_frame
 from torch_frame.config import TextEmbedderConfig
 from torch_frame.data import Dataset
@@ -42,6 +40,8 @@ from db_transformer.helpers.objectpickle import serialize, deserialize
 
 class GloveTextEmbedding:
     def __init__(self):
+        from sentence_transformers import SentenceTransformer
+
         self.model = SentenceTransformer(
             "sentence-transformers/average_word_embeddings_glove.6B.300d"
         )
@@ -82,7 +82,6 @@ class CTUDataset:
                 db = Database.load(self.db_dir)
                 self._save_schema()
 
-        self.text_embedder_cfg = TextEmbedderConfig(text_embedder=GloveTextEmbedding())
         self.db = db
 
     @property
@@ -98,7 +97,10 @@ class CTUDataset:
         return os.path.join(self.db_dir, "schema.json")
 
     def build_hetero_data(
-        self, device: str = None, force_rematerilize: bool = False
+        self,
+        device: str = None,
+        force_rematerilize: bool = False,
+        no_text_emebedding: bool = False,
     ) -> HeteroData:
         data = HeteroData()
 
@@ -111,6 +113,11 @@ class CTUDataset:
         if force_rematerilize and os.path.exists(materialized_dir):
             shutil.rmtree(materialized_dir)
         Path(materialized_dir).mkdir(parents=True, exist_ok=True)
+
+        if no_text_emebedding:
+            text_embedder_cfg = None
+        else:
+            text_embedder_cfg = TextEmbedderConfig(text_embedder=GloveTextEmbedding())
 
         for table_name, table_schema in wrap_progress(
             self.schema.items(), verbose=True, desc="Building data"
@@ -155,6 +162,13 @@ class CTUDataset:
                     for c in mlb.classes_:
                         col_to_stype[c] = torch_frame.stype.categorical
 
+            if no_text_emebedding:
+                col_to_stype = {
+                    c: _stype
+                    for c, _stype in col_to_stype.items()
+                    if _stype.parent != torch_frame.stype.embedding
+                }
+
             if len(col_to_stype) == 0 or (
                 len(col_to_stype) == 1 and target_col is not None
             ):
@@ -168,7 +182,7 @@ class CTUDataset:
                 return Dataset(
                     df=table,
                     col_to_stype=col_to_stype,
-                    col_to_text_embedder_cfg=self.text_embedder_cfg,
+                    col_to_text_embedder_cfg=text_embedder_cfg,
                     target_col=target_col,
                 ).materialize(device, path=os.path.join(materialized_dir, table_name))
 

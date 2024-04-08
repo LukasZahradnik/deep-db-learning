@@ -32,27 +32,31 @@ class BlueprintModel(torch.nn.Module):
         edge_types: Optional[List[EdgeType]] = None,
         stype_encoder_dict: Optional[Dict[torch_frame.stype, StypeEncoder]] = None,
         positional_encoding: bool = True,
+        positional_encoding_dropout: float = 0,
+        per_column_embedding: bool = True,
         num_gnn_layers: int = 1,
         table_transform: Optional[
             Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
         ] = None,
         table_transform_unique: bool = True,
+        table_transform_dropout: Optional[float] = None,
+        table_transform_residual: bool = False,
+        table_transform_norm: bool = True,
         table_combination: Optional[
-            Union[torch.nn.Module, Callable[[int, str], torch.nn.Module]]
+            Union[
+                torch.nn.Module,
+                Callable[[int, str, Tuple[List[str], List[str]]], torch.nn.Module],
+            ]
         ] = None,
         table_combination_unique: bool = True,
+        table_combination_dropout: Optional[float] = None,
+        table_combination_residual: bool = False,
+        table_combination_norm: bool = True,
         decoder_aggregation: AggrFunction = torch.nn.Identity(),
         decoder: Optional[
             Union[torch.nn.Module, Callable[[List[str]], torch.nn.Module]]
         ] = None,
         output_activation: Optional[torch.nn.Module] = None,
-        positional_encoding_dropout: float = 0,
-        table_transform_dropout: Optional[float] = None,
-        table_combination_dropout: Optional[float] = None,
-        table_transform_residual: bool = False,
-        table_combination_residual: bool = False,
-        table_transform_norm: bool = True,
-        table_combination_norm: bool = True,
     ):
         super().__init__()
 
@@ -100,6 +104,16 @@ class BlueprintModel(torch.nn.Module):
                     "x_dict -> x_dict",
                 )
             )
+        if not per_column_embedding:
+            embedder_layers.append(
+                (
+                    NodeApplied(
+                        lambda _: lambda x: x.view(*x.shape[:-2], -1),
+                        self.node_types,
+                    ),
+                    "x_dict -> x_dict",
+                )
+            )
 
         self.embedder = Sequential("tf_dict", embedder_layers)
 
@@ -123,7 +137,11 @@ class BlueprintModel(torch.nn.Module):
                     else table_combination
                 )
             else:
-                return table_combination(i, edge_type)
+                return table_combination(
+                    i,
+                    edge_type,
+                    (self.embedded_cols[edge_type[0]], self.embedded_cols[edge_type[2]]),
+                )
 
         for i in range(num_gnn_layers):
             if table_transform is not None:

@@ -16,10 +16,15 @@ class NodeApplied(torch.nn.Module):
         super().__init__()
         self.node_types = node_types
         self.dynamic_args = dynamic_args
+
+        self.node_layer_dict = {}
+        for k in node_types:
+            self.node_layer_dict[k] = factory(k)
+            if not isinstance(self.node_layer_dict[k], torch.nn.Module):
+                learnable = False
+
         if learnable:
-            self.node_layer_dict = torch.nn.ModuleDict({k: factory(k) for k in node_types})
-        else:
-            self.node_layer_dict = {k: factory(k) for k in node_types}
+            self.node_layer_dict = torch.nn.ModuleDict(self.node_layer_dict)
 
     def forward(self, x_dict: Dict[NodeType, Any], *argv) -> Dict[NodeType, Any]:
         out_dict: Dict[NodeType, Any] = {}
