@@ -1,16 +1,11 @@
 from dataclasses import dataclass
-from enum import Enum
 from typing import Callable, Dict, Literal, Optional, Tuple, Union
 
-from db_transformer.data.dataset_defaults.fit_dataset_fixes import fix_citeseer_schema
+from db_transformer.data.dataset_defaults.utils import fix_citeseer_schema
+from db_transformer.data.dataset_defaults.utils import TaskType
 from db_transformer.db.distinct_cnt_retrieval import DBDistinctCounter
 from db_transformer.db.schema_autodetect import BuiltinDBDistinctCounter
 from db_transformer.schema.schema import Schema
-
-
-class TaskType(Enum):
-    CLASSIFICATION = 1
-    REGRESSION = 2
 
 
 # fmt:off

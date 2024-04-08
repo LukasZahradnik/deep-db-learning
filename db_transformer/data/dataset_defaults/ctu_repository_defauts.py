@@ -2,23 +2,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Literal, Dict, Optional, Tuple, Union
 
+from db_transformer.data.dataset_defaults.utils import TaskType
 from db_transformer.db.distinct_cnt_retrieval import DBDistinctCounter
 from db_transformer.db.schema_autodetect import BuiltinDBDistinctCounter
 from db_transformer.schema import Schema, ForeignKeyDef
-
-
-class TaskType(Enum):
-    CLASSIFICATION = 1
-    REGRESSION = 2
-    LINK_PREDICTION = 3
-
-    def to_type(self) -> str:
-        if self.name == "CLASSIFICATION":
-            return "categorical"
-        elif self.name == "REGRESSION":
-            return "numeric"
-        else:
-            return "edge_type"
 
 
 @dataclass
