@@ -37,13 +37,6 @@ from ray import tune
 from ray.tune.search.optuna import OptunaSearch
 from ray.air import session as RaySession
 
-from db_transformer.nn import (
-    BlueprintModel,
-    EmbeddingTranscoder,
-    SelfAttention,
-    CrossAttentionConv,
-    NodeApplied,
-)
 from db_transformer.nn.lightning import LightningWrapper
 from db_transformer.nn.lightning.callbacks import (
     BestMetricsLoggerCallback,
@@ -51,7 +44,6 @@ from db_transformer.nn.lightning.callbacks import (
 )
 from db_transformer.data import (
     CTUDataset,
-    TaskType,
     CTUDatasetName,
 )
 
@@ -109,7 +101,7 @@ def train_model(config: tune.TuneConfig):
         print(f"Device: {device}")
 
         dataset = CTUDataset(
-            config["dataset"], data_dir=config["shared_dir"], force_remake=False
+            config["dataset"], data_dir=config.pop("shared_dir", None), force_remake=False
         )
 
         target = dataset.defaults.target
@@ -178,6 +170,7 @@ def run_experiment(
     useCuda=False,
     run_name: str = None,
     random_seed: int = RANDOM_SEED,
+    cuda_devices: int = None,
 ):
     random.seed(random_seed)
     np.random.seed(random_seed)
@@ -189,10 +182,16 @@ def run_experiment(
     time_str = datetime.now().strftime("%d-%m-%Y,%H:%M:%S")
     run_name = f"{dataset}_{time_str}" if run_name is None else run_name
 
+    if useCuda and cuda_devices is None:
+        cuda_devices = 1
+
     with mlflow.start_run(run_name=run_name) as run:
         client = mlflow.tracking.MlflowClient(tracking_uri)
 
-        ray.init(num_cpus=4, num_gpus=1)
+        if useCuda and torch.cuda.is_available():
+            ray.init(num_cpus=cuda_devices * 2, num_gpus=cuda_devices)
+        else:
+            ray.init()
 
         analysis: tune.ExperimentAnalysis = tune.run(
             train_model,
@@ -206,14 +205,13 @@ def run_experiment(
             config={
                 "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
                 "betas": [0.9, 0.999],
-                "embed_dim": tune.choice([16, 32]),
+                "embed_dim": tune.choice([32, 64]),
                 "aggr": tune.choice(["sum"]),
-                "gnn": tune.choice([[], [16]]),
-                "mlp": tune.choice([[8], [16], [32]]),
-                "batch_norm": tune.choice([True]),
-                "layer_norm": tune.choice([False]),
+                "gnn_layers": tune.choice([[], [16]]),
+                "mlp_dims": tune.choice([[], [64], [64, 64]]),
+                "batch_norm": tune.choice([True, False]),
                 "dataset": dataset,
-                "epochs": 10,
+                "epochs": 2000,
                 "device": "cuda" if useCuda else "cpu",
                 "seed": random_seed,
                 "shared_dir": os.path.join(os.getcwd(), "datasets"),
@@ -251,6 +249,7 @@ parser.add_argument(
 parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
 parser.add_argument("--num_samples", type=int, default=1)
 parser.add_argument("--cuda", default=False, action="store_true")
+parser.add_argument("--cuda_devices", type=int, default=None)
 parser.add_argument("--run_name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=RANDOM_SEED)
 
@@ -265,4 +264,5 @@ run_experiment(
     args.cuda,
     args.run_name,
     args.seed,
+    args.cuda_devices,
 )

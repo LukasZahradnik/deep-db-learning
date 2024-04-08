@@ -20,7 +20,7 @@ def create_honza_model(
     target = defaults.target
 
     embed_dim = config.get("embed_dim", 64)
-    num_layers = config.get("num_layers", 1)
+    gnn_layers = config.get("gnn_layers", 1)
     batch_norm = config.get("batch_norm", False)
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
@@ -64,7 +64,7 @@ def create_honza_model(
         },
         positional_encoding=False,
         per_column_embedding=False,
-        num_gnn_layers=num_layers,
+        num_gnn_layers=gnn_layers,
         table_transform=lambda i, node, cols: (
             torch.nn.Identity()
             if i == 0
@@ -90,7 +90,7 @@ def create_honza_model(
         ),
         table_combination_unique=True,
         decoder_aggregation=torch.nn.Identity(),
-        decoder=lambda cols: get_decoder(len(cols) * int(embed_dim / 2**num_layers)),
+        decoder=lambda cols: get_decoder(len(cols) * int(embed_dim / 2**gnn_layers)),
         output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
         table_transform_dropout=0.0,
