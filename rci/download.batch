@@ -1,0 +1,12 @@
+#!/bin/bash
+
+#SBATCH --partition=cpu
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8000
+#SBATCH --time=00:20:00
+
+id=$1
+dataset=$2
+
+srun --output=./logs/download/${dataset}.log python -u rci/download_dataset.py --dataset=$dataset
