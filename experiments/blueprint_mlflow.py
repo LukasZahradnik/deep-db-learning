@@ -47,7 +47,7 @@ from db_transformer.data import (
     CTUDatasetName,
 )
 
-from .blueprint_instances.instances import create_blueprint_model
+from experiments.blueprint_instances.instances import create_blueprint_model
 
 DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 
@@ -200,18 +200,18 @@ def run_experiment(
             mode="max",
             search_alg=OptunaSearch(),
             num_samples=num_samples,
-            storage_path=os.getcwd() + "/ray_tune_results",
+            storage_path=os.getcwd() + "/ray_results",
             resources_per_trial={"gpu": 1, "cpu": 2} if useCuda else None,
             config={
                 "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
                 "betas": [0.9, 0.999],
                 "embed_dim": tune.choice([32, 64]),
                 "aggr": tune.choice(["sum"]),
-                "gnn_layers": tune.choice([[], [16]]),
+                "gnn_layers": tune.randint(1, 5),
                 "mlp_dims": tune.choice([[], [64], [64, 64]]),
                 "batch_norm": tune.choice([True, False]),
                 "dataset": dataset,
-                "epochs": 2000,
+                "epochs": 4000,
                 "device": "cuda" if useCuda else "cpu",
                 "seed": random_seed,
                 "shared_dir": os.path.join(os.getcwd(), "datasets"),
