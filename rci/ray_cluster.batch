@@ -1,0 +1,12 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu
+#SBATCH --nodes=3
+#SBATCH --gres=gpu:4
+#SBATCH --mem-per-gpu=8G
+#SBATCH --cpus-per-task=16
+#SBATCH --time=01:00:00
+
+id="cluster_$(date '+%d-%m-%Y_%H:%M:%S')"
+
+srun --output=./logs/${id}/run.log python -u rci/ray_cluster.py --cpu_devices=16 --gpu_devices=4
