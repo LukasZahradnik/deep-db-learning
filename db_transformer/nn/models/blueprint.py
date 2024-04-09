@@ -62,7 +62,7 @@ class BlueprintModel(torch.nn.Module):
 
         self.target_table = target[0]
         self.target_col = target[1]
-        self.node_types = list(col_stats_per_table.keys())
+        self.node_types = list(col_names_dict_per_table.keys())
         self.edge_types = edge_types
         self.embedded_stypes = (
             list(stype_encoder_dict.keys())
@@ -188,6 +188,11 @@ class BlueprintModel(torch.nn.Module):
                             "x_dict -> x_dict",
                         )
                     )
+
+            if edge_types is None or len(edge_types) == 0:
+                layers.append((torch.nn.Identity(), f"x_dict -> x_dict_{i+1}"))
+                continue
+
             if table_combination is None:
                 table_combination = CrossAttentionConv(embed_dim, 4)
             is_combination_module = isinstance(table_combination, torch.nn.Module)

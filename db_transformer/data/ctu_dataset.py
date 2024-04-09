@@ -35,6 +35,7 @@ from db_transformer.data.dataset_defaults.ctu_repository_defauts import (
     CTUDatasetName,
     CTU_REPOSITORY_DEFAULTS,
 )
+from db_transformer.data.dataset_defaults.utils import TaskType
 from db_transformer.helpers.objectpickle import serialize, deserialize
 
 
@@ -176,7 +177,18 @@ class CTUDataset:
                 df["__filler"] = 0
 
             if target_col is not None and target_col not in col_to_stype:
-                col_to_stype[target_col] = infer_series_stype(df[target_col])
+                col_to_stype[target_col] = (
+                    torch_frame.stype.categorical
+                    if self.defaults.task == TaskType.CLASSIFICATION
+                    else infer_series_stype(df[target_col])
+                )
+
+            # convert target categorical column to integer codes
+            if (
+                target_col is not None
+                and col_to_stype[target_col] == torch_frame.stype.categorical
+            ):
+                df[target_col] = pd.factorize(df[target_col])[0]
 
             def __build_frame_dataset(table, col_to_stype):
                 return Dataset(
