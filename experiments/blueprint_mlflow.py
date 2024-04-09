@@ -195,7 +195,7 @@ def run_experiment(
             search_alg=OptunaSearch(),
             num_samples=num_samples,
             storage_path=os.getcwd() + "/ray_results",
-            resources_per_trial={"gpu": 1, "cpu": 2} if useCuda else None,
+            resources_per_trial={"gpu": 1, "cpu": 1} if useCuda else None,
             config={
                 "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
                 "betas": [0.9, 0.999],
