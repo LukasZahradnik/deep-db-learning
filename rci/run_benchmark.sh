@@ -7,12 +7,11 @@ datasets=('Accidents' 'Airline' 'Atherosclerosis' 'Basketball_women' 'Bupa' 'Car
     'nations' 'NBA' 'NCAA' 'Pima' 'PremierLeague' 'PTE' 'PubMed_Diabetes' 'Same_gen' 'SAP' 'SAT'
     'Shakespeare' 'Student_loan' 'Toxicology' 'tpcc' 'tpcd' 'tpcds' 'trains' 'university' 'UTube'
     'UW_std' 'VisualGenome' 'voc' 'WebKP' 'world')
-
 # datasets=('Dallas' 'world')
 
 id="simple_$(openssl rand -hex 4)_$(date '+%d-%m-%Y_%H:%M:%S')"
 
-for d in ${cls_datasets[@]}; do
+for d in ${datasets[@]}; do
     sbatch -o logs/$id/$d/batch.log rci/dataset.batch $id $d &
 done
 
