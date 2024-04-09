@@ -114,13 +114,14 @@ def train_model(config: tune.TuneConfig):
         )(data)
 
         num_neighbors = {
-            edge_type: [30] * 5 for edge_type in data.collect("edge_index").keys()
+            edge_type: [30] * 5
+            for edge_type in data.collect("edge_index", allow_empty=True).keys()
         }
 
         train_loader = NeighborLoader(
             data,
             num_neighbors=num_neighbors,
-            batch_size=10000,
+            batch_size=512,
             input_nodes=(target[0], data[target[0]].train_mask),
             subgraph_type="bidirectional",
         )
@@ -128,13 +129,30 @@ def train_model(config: tune.TuneConfig):
         val_loader = NeighborLoader(
             data,
             num_neighbors=num_neighbors,
-            batch_size=1000,
+            batch_size=512,
             input_nodes=(target[0], data[target[0]].val_mask),
             subgraph_type="bidirectional",
         )
 
+        sample: HeteroData = next(iter(train_loader))
+
+        edge_types = list(sample.collect("edge_index", allow_empty=True).keys())
+
+        model = create_blueprint_model(
+            "honza",
+            dataset.defaults,
+            {
+                node: tf.col_names_dict
+                for node, tf in sample.collect("tf").items()
+                if tf.num_rows > 0
+            },
+            edge_types,
+            data.collect("col_stats"),
+            config,
+        )
+
         lightning_model = LightningWrapper(
-            create_blueprint_model("honza", dataset.defaults, data, config).to(device),
+            model.to(device),
             dataset.defaults.target_table,
             lr=config["lr"],
             betas=config["betas"],
