@@ -163,6 +163,7 @@ def train_model(config: tune.TuneConfig):
 
 
 def run_experiment(
+    ray_address: str,
     tracking_uri: str,
     experiment_name: str,
     dataset: CTUDatasetName,
@@ -170,7 +171,6 @@ def run_experiment(
     useCuda=False,
     run_name: str = None,
     random_seed: int = RANDOM_SEED,
-    cuda_devices: int = None,
 ):
     random.seed(random_seed)
     np.random.seed(random_seed)
@@ -182,16 +182,10 @@ def run_experiment(
     time_str = datetime.now().strftime("%d-%m-%Y,%H:%M:%S")
     run_name = f"{dataset}_{time_str}" if run_name is None else run_name
 
-    if useCuda and cuda_devices is None:
-        cuda_devices = 1
-
     with mlflow.start_run(run_name=run_name) as run:
         client = mlflow.tracking.MlflowClient(tracking_uri)
 
-        if useCuda and torch.cuda.is_available():
-            ray.init(num_cpus=cuda_devices * 2, num_gpus=cuda_devices)
-        else:
-            ray.init()
+        ray.init(address=ray_address, ignore_reinit_error=True)
 
         analysis: tune.ExperimentAnalysis = tune.run(
             train_model,
@@ -246,10 +240,11 @@ parser = ArgumentParser()
 parser.add_argument(
     "--dataset", type=str, default=DEFAULT_DATASET_NAME, choices=get_args(CTUDatasetName)
 )
+
+parser.add_argument("--ray_address", type=str, default="auto")
 parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
 parser.add_argument("--num_samples", type=int, default=1)
 parser.add_argument("--cuda", default=False, action="store_true")
-parser.add_argument("--cuda_devices", type=int, default=None)
 parser.add_argument("--run_name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=RANDOM_SEED)
 
@@ -257,6 +252,7 @@ args = parser.parse_args()
 print(args)
 
 run_experiment(
+    args.ray_address,
     "http://147.32.83.171:2222",
     args.experiment,
     args.dataset,
@@ -264,5 +260,4 @@ run_experiment(
     args.cuda,
     args.run_name,
     args.seed,
-    args.cuda_devices,
 )
