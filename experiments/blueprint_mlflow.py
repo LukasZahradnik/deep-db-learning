@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 from datetime import datetime
 import math
 import os, sys
+import traceback
 
 sys.path.append(os.getcwd())
 
@@ -29,7 +30,7 @@ from torch_frame.data import StatType
 
 import mlflow
 from mlflow.tracking import MlflowClient
-from mlflow.entities import Run
+from mlflow.entities import Run, RunStatus, Param
 from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 
 import ray
@@ -47,7 +48,7 @@ from db_transformer.data import (
     CTUDatasetName,
 )
 
-from .blueprint_instances.instances import create_blueprint_model
+from experiments.blueprint_instances.instances import create_blueprint_model
 
 DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 
@@ -89,7 +90,7 @@ def train_model(config: tune.TuneConfig):
 
     run_id = run.info.run_id
 
-    params = [mlflow.entities.Param(k, str(v)) for (k, v) in config.items()]
+    params = [Param(k, str(v)) for (k, v) in config.items()]
     client.log_batch(run_id, params=params)
 
     try:
@@ -172,12 +173,13 @@ def train_model(config: tune.TuneConfig):
         )
 
         trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
-
         client.set_terminated(run_id)
 
-    except Exception as ex:
-        client.set_tag(run_id, "exception", str(ex))
-        raise ex
+    except Exception:
+        err = traceback.format_exc()
+        print(f"Error: {err}")
+        client.set_tag(run_id, "exception", str(err))
+        client.set_terminated(run_id, "FAILED")
 
 
 def run_experiment(
@@ -218,18 +220,18 @@ def run_experiment(
             mode="max",
             search_alg=OptunaSearch(),
             num_samples=num_samples,
-            storage_path=os.getcwd() + "/ray_tune_results",
+            storage_path=os.getcwd() + "/ray_results",
             resources_per_trial={"gpu": 1, "cpu": 2} if useCuda else None,
             config={
                 "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
                 "betas": [0.9, 0.999],
                 "embed_dim": tune.choice([32, 64]),
                 "aggr": tune.choice(["sum"]),
-                "gnn_layers": tune.choice([[], [16]]),
+                "gnn_layers": tune.randint(1, 5),
                 "mlp_dims": tune.choice([[], [64], [64, 64]]),
                 "batch_norm": tune.choice([True, False]),
                 "dataset": dataset,
-                "epochs": 2000,
+                "epochs": 4000,
                 "device": "cuda" if useCuda else "cpu",
                 "seed": random_seed,
                 "shared_dir": os.path.join(os.getcwd(), "datasets"),
