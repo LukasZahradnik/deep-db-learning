@@ -34,9 +34,9 @@ class LightningWrapper(L.LightningModule):
 
         if loss_module is None:
             if task_type == TaskType.CLASSIFICATION:
-                loss_module = torch.nn.CrossEntropyLoss()
+                loss_module = torch.nn.CrossEntropyLoss(reduction="mean")
             else:
-                loss_module = torch.nn.MSELoss()
+                loss_module = torch.nn.MSELoss(reduction="mean")
 
         if metrics is None:
             metrics = {}
@@ -60,12 +60,25 @@ class LightningWrapper(L.LightningModule):
         loss = self.loss_module(out, target)
 
         batch_size = target.shape[0]
-        self.log(f"{mode}_loss", loss, batch_size=batch_size, prog_bar=self.verbose)
+        self.log(
+            f"{mode}_loss",
+            loss,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=self.verbose,
+        )
 
         metric_dict = {
             f"{mode}_{name}": metric(out, target) for name, metric in self.metrics.items()
         }
-        self.log_dict(metric_dict, batch_size=batch_size, prog_bar=self.verbose)
+        self.log_dict(
+            metric_dict,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=self.verbose,
+        )
 
         return loss
 
