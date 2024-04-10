@@ -1,5 +1,5 @@
 from argparse import ArgumentParser
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 import os, sys
 import traceback
@@ -135,16 +135,14 @@ def train_model(config: tune.TuneConfig):
             subgraph_type="bidirectional",
         )
 
-        sample: HeteroData = next(iter(train_loader))
-
-        edge_types = list(sample.collect("edge_index", allow_empty=True).keys())
+        edge_types = list(data.collect("edge_index", allow_empty=True).keys())
 
         model = create_blueprint_model(
             "honza",
             dataset.defaults,
             {
                 node: tf.col_names_dict
-                for node, tf in sample.collect("tf").items()
+                for node, tf in data.collect("tf").items()
                 if tf.num_rows > 0
             },
             edge_types,
@@ -168,6 +166,7 @@ def train_model(config: tune.TuneConfig):
                 BestMetricsLoggerCallback(),
                 MLFlowLoggerCallback(run_id, client, session),
             ],
+            max_time=timedelta(hours=12),
             max_epochs=config["epochs"],
             max_steps=-1,
         )
