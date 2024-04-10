@@ -3,9 +3,6 @@ from typing import List, Dict, Literal, Optional, Any
 
 import lightning as L
 
-import mlflow
-from mlflow.tracking import MlflowClient
-
 
 class BestMetricsLoggerCallback(L.Callback):
     def __init__(
@@ -61,12 +58,18 @@ class MLFlowLoggerCallback(L.Callback):
     def __init__(
         self,
         run_id: str,
-        mlflow_client: MlflowClient,
+        mlflow_client: Any,
         ray_session: Any,
         metrics: Optional[List[str]] = None,
     ) -> None:
+
+        from mlflow.entities import Metric
+        from mlflow.tracking import MlflowClient
+
+        self.Metric = Metric
+
         self.run_id = run_id
-        self.mlflow_client = mlflow_client
+        self.mlflow_client: MlflowClient = mlflow_client
         self.ray_session = ray_session
 
         if metrics is None:
@@ -92,7 +95,7 @@ class MLFlowLoggerCallback(L.Callback):
                 trainer.callback_metrics[metric_name].detach().cpu().item()
             )
             mlflow_metrics.append(
-                mlflow.entities.Metric(
+                self.Metric(
                     metric_name, metric_dict[metric_name], timestamp, trainer.current_epoch
                 )
             )
