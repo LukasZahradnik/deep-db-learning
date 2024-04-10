@@ -31,7 +31,7 @@ class NodeApplied(torch.nn.Module):
 
         if self.dynamic_args:
             input_dict = defaultdict(list)
-            for k in self.node_types:
+            for k in x_dict:
                 input_dict[k].append(x_dict[k])
                 for arg in argv:
                     if not isinstance(arg, dict):
@@ -39,10 +39,10 @@ class NodeApplied(torch.nn.Module):
                     else:
                         input_dict[k].append(arg[k])
 
-            for k in self.node_types:
-                out_dict[k] = self.node_layer_dict[k](*input_dict[k])
+            for k, xs in input_dict.items():
+                out_dict[k] = self.node_layer_dict[k](*xs)
         else:
-            for k in self.node_types:
-                out_dict[k] = self.node_layer_dict[k](x_dict[k])
+            for k, x in x_dict.items():
+                out_dict[k] = self.node_layer_dict[k](x)
 
         return out_dict

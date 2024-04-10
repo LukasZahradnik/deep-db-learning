@@ -79,7 +79,6 @@ class DBEmbedder(torch.nn.Module):
         super().__init__()
 
         self.return_cols = return_cols
-        self.table_names = list(col_names_dict_per_table.keys())
 
         self.table_embedders = torch.nn.ModuleDict()
         for table_name in col_names_dict_per_table:
@@ -108,8 +107,8 @@ class DBEmbedder(torch.nn.Module):
     def forward(self, tf_dict: Dict[NodeType, TensorFrame]) -> Dict[NodeType, torch.Tensor]:
         x_dict = {}
         cols_dict = {}
-        for table_name in self.table_names:
-            x, cols = self.table_embedders[table_name](tf_dict[table_name])
+        for table_name, tf in tf_dict.items():
+            x, cols = self.table_embedders[table_name](tf)
             x_dict[table_name] = x
             cols_dict[table_name] = cols
 
