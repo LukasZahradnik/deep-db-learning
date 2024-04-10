@@ -4,7 +4,6 @@ __pycache__/
 processed/
 raw/
 
-ray_tune_results/
 ray_results/
 logs/
 lightning_logs/

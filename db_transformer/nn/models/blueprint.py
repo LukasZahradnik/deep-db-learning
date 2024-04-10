@@ -258,9 +258,11 @@ class BlueprintModel(torch.nn.Module):
 
     def forward(
         self,
-        tf_dict: Dict[str, torch_frame.TensorFrame],
-        edge_dict: Dict[str, torch.Tensor],
+        tf_dict: Dict[NodeType, torch_frame.TensorFrame],
+        edge_dict: Dict[EdgeType, torch.Tensor],
     ):
+        tf_dict, edge_dict = self._remove_empty(tf_dict, edge_dict)
+
         x_dict = self.embedder(tf_dict)
 
         x_dict = self.hetero_gnn(x_dict, edge_dict)
@@ -272,3 +274,21 @@ class BlueprintModel(torch.nn.Module):
         x_target = self.decoder(x_target)
 
         return x_target
+
+    def _remove_empty(
+        cls,
+        tf_dict: Dict[NodeType, torch_frame.TensorFrame],
+        edge_dict: Dict[EdgeType, torch.Tensor],
+    ) -> Tuple[Dict[NodeType, torch_frame.TensorFrame], Dict[EdgeType, torch.Tensor]]:
+        out_tf_dict = {}
+        out_edge_dict = {}
+        for node, tf in tf_dict.items():
+            if tf.num_rows > 0:
+                out_tf_dict[node] = tf
+
+        for edge, edge_index in edge_dict.items():
+            (src, _, dst) = edge
+            if src in out_tf_dict and dst in out_tf_dict:
+                out_edge_dict[edge] = edge_index
+
+        return out_tf_dict, out_edge_dict

@@ -65,11 +65,12 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         timestamp_column="FlightDate",
         task=TaskType.CLASSIFICATION,
     ),
+    # TODO: Review the change in target
     "Atherosclerosis": CTUDatasetDefault(
-        target_table="Death",
-        target_column="PRICUMR",
+        target_table="Entry",
+        target_column="STAV",
         target_id="ICO",
-        timestamp_column="ROKUMR",
+        # timestamp_column="ROKUMR",
         task=TaskType.CLASSIFICATION,
     ),
     "AustralianFootball": CTUDatasetDefault(

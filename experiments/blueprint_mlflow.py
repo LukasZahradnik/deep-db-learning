@@ -1,7 +1,8 @@
 from argparse import ArgumentParser
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 import os, sys
+import traceback
 
 sys.path.append(os.getcwd())
 
@@ -29,7 +30,7 @@ from torch_frame.data import StatType
 
 import mlflow
 from mlflow.tracking import MlflowClient
-from mlflow.entities import Run
+from mlflow.entities import Run, RunStatus, Param
 from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 
 import ray
@@ -89,7 +90,7 @@ def train_model(config: tune.TuneConfig):
 
     run_id = run.info.run_id
 
-    params = [mlflow.entities.Param(k, str(v)) for (k, v) in config.items()]
+    params = [Param(k, str(v)) for (k, v) in config.items()]
     client.log_batch(run_id, params=params)
 
     try:
@@ -134,16 +135,14 @@ def train_model(config: tune.TuneConfig):
             subgraph_type="bidirectional",
         )
 
-        sample: HeteroData = next(iter(train_loader))
-
-        edge_types = list(sample.collect("edge_index", allow_empty=True).keys())
+        edge_types = list(data.collect("edge_index", allow_empty=True).keys())
 
         model = create_blueprint_model(
             "honza",
             dataset.defaults,
             {
                 node: tf.col_names_dict
-                for node, tf in sample.collect("tf").items()
+                for node, tf in data.collect("tf").items()
                 if tf.num_rows > 0
             },
             edge_types,
@@ -167,17 +166,19 @@ def train_model(config: tune.TuneConfig):
                 BestMetricsLoggerCallback(),
                 MLFlowLoggerCallback(run_id, client, session),
             ],
+            max_time=timedelta(hours=12),
             max_epochs=config["epochs"],
             max_steps=-1,
         )
 
         trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
-
         client.set_terminated(run_id)
 
-    except Exception as ex:
-        client.set_tag(run_id, "exception", str(ex))
-        raise ex
+    except Exception:
+        err = traceback.format_exc()
+        print(f"Error: {err}")
+        client.set_tag(run_id, "exception", str(err))
+        client.set_terminated(run_id, "FAILED")
 
 
 def run_experiment(
