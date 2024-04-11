@@ -36,7 +36,7 @@ from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 import ray
 from ray import tune
 from ray.tune.search.optuna import OptunaSearch
-from ray.air import session as RaySession
+from ray.air import session as RaySession, CheckpointConfig
 
 from db_transformer.nn.lightning import LightningWrapper
 from db_transformer.nn.lightning.callbacks import (
@@ -156,6 +156,7 @@ def train_model(config: tune.TuneConfig):
             lr=config["lr"],
             betas=config["betas"],
             task_type=dataset.defaults.task,
+            verbose=False,
         ).to(device)
 
         trainer = L.Trainer(
@@ -169,15 +170,16 @@ def train_model(config: tune.TuneConfig):
             max_time=timedelta(hours=12),
             max_epochs=config["epochs"],
             max_steps=-1,
+            enable_checkpointing=False,
         )
 
         trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
         client.set_terminated(run_id)
 
     except Exception:
-        err = traceback.format_exc()
+        err = traceback.format_exc(limit=100)
         print(f"Error: {err}")
-        client.set_tag(run_id, "exception", str(err))
+        client.set_tag(run_id, "exception", err)
         client.set_terminated(run_id, "FAILED")
 
 
@@ -218,9 +220,14 @@ def run_experiment(
             metric="best_val_acc",
             mode="max",
             search_alg=OptunaSearch(),
+            checkpoint_config=CheckpointConfig(num_to_keep=1),
             num_samples=num_samples,
             storage_path=os.getcwd() + "/ray_results",
-            resources_per_trial={"gpu": 1, "cpu": 2} if useCuda else None,
+            resources_per_trial=(
+                {"gpu": 1, "cpu": 1, "memory": 4_000_000_000}
+                if useCuda
+                else {"cpu": 1, "memory": 4_000_000_000}
+            ),
             config={
                 "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
                 "betas": [0.9, 0.999],
