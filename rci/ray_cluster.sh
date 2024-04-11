@@ -12,7 +12,7 @@ if [[ -z "$PYTHON_SCRIPT" ]]; then
     PYTHON_SCRIPT="experiments/blueprint_mlflow.py"
 fi
 
-id="${NAME}_$(date '+%d-%m-%Y_%H:%M:%S')_$(openssl rand -hex 4)"
+id="${NAME}_$(date '+%d-%m-%Y_%H:%M:%S')"
 
 if [ "$USE_CUDA" = true ] ; then
     echo "Using CUDA"
