@@ -16,10 +16,10 @@ id="${NAME}_$(date '+%d-%m-%Y_%H:%M:%S')"
 
 if [ "$USE_CUDA" = true ] ; then
     echo "Using CUDA"
-    sbatch -o logs/$id/batch.log rci/ray_cluster_cuda.batch $id ${PYTHON_SCRIPT}
+    sbatch -o logs/$id/batch.log scripts/rci/ray_cluster_cuda.batch $id ${PYTHON_SCRIPT}
 else
     echo "Not using CUDA"
-    sbatch -o logs/$id/batch.log rci/ray_cluster.batch $id ${PYTHON_SCRIPT}
+    sbatch -o logs/$id/batch.log scripts/rci/ray_cluster.batch $id ${PYTHON_SCRIPT}
 fi
 
 wait

@@ -13,7 +13,7 @@ id=$1
 dataset=$2
 
 srun --output=./logs/${id}/${dataset}/run.log \
-python -u experiments/blueprint_mlflow.py --experiment=deep-db-experiments-pelesjak \
---cuda --dataset=$dataset --num_samples=8 --run_name=${id}_${dataset} --cuda_devices=4
+python -u experiments/blueprint_mlflow.py --experiment=pelesjak-deep-db-experiments-v1 \
+--cuda --dataset=$dataset --num_samples=8 --run_name=${id}_${dataset}
 
 

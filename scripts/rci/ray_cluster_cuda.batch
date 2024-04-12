@@ -1,11 +1,10 @@
 #!/bin/bash
 
-#SBATCH --partition=amd
-#SBATCH --nodes=3
+#SBATCH --partition=gpu
+#SBATCH --nodes=2
 #SBATCH --cpus-per-task=32
-#SBATCH --mem-per-cpu=4G
-#SBATCH --time=12:00:00
-#SBATCH --exclusive
+#SBATCH --gres=gpu:4
+#SBATCH --time=24:00:00
 
 id=$1
 
@@ -43,9 +42,9 @@ echo "cpus per task $SLURM_CPUS_PER_TASK"
 
 # launch head node, leaving one core unused for the main python script
 echo "STARTING HEAD at $node_1"
-srun --job-name="ray-head" --nodes=1 --ntasks=1 --cpus-per-task=1 -w "$node_1" --pty bash \
-    rci/conda_env.sh "$conda_env" \
-    "ray start --head --num-cpus=1 --node-ip-address=$ip --port=$port --block" &
+srun --job-name="ray-head" --nodes=1 --ntasks=1 --gres=gpu:4 --cpus-per-task=1 -w "$node_1" --pty bash \
+    scripts/conda_env.sh "$conda_env" \
+    "ray start --head --num-cpus=1 --num-gpus=4 --node-ip-address=$ip --port=$port --block" &
 ray_head=$!
 sleep 15
 
@@ -55,9 +54,9 @@ worker_num=$((SLURM_JOB_NUM_NODES - 1))
 for ((i = 1; i <= worker_num; i++)); do
  node_i=${nodes_array[$i]}
  echo "STARTING WORKER $i at $node_i"
-  srun --job-name="ray-worker" --nodes=1 --ntasks=1 -w "$node_i" --pty bash \
-    rci/conda_env.sh "$conda_env" \
-    "ray start --address=$ip_head --block --num-cpus=$SLURM_CPUS_PER_TASK" &
+  srun --job-name="ray-worker" --nodes=1 --ntasks=1 --gres=gpu:4 -w "$node_i" --pty bash \
+    scripts/conda_env.sh "$conda_env" \
+    "ray start --address=$ip_head --block --num-cpus=$SLURM_CPUS_PER_TASK" --num-gpus=4 &
   ray_workers+=$!
   sleep 10
 done
@@ -104,8 +103,8 @@ for dataset in "${cls_datasets[@]}"
 do
     srun --output=./logs/${id}/${dataset}/run.log --nodes=1 --ntasks=1 --cpus-per-task=1 --gres=gpu:0 \
     python -u ${python_script} --ray_address=${ip_head} \
-    --experiment=deep-db-experiments-pelesjak \
-    --dataset=${dataset} --num_samples=8 --run_name=${id}_${dataset} &
+    --cuda --experiment=pelesjak-deep-db-experiments-v1 \
+    --dataset=${dataset} --num_samples=4 --run_name=${id}_${dataset} &
 
     run_pids+=($!)
 
