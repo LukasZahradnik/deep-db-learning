@@ -52,7 +52,7 @@ from experiments.blueprint_instances.instances import create_blueprint_model
 
 DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 
-DEFAULT_EXPERIMENT_NAME = "deep-db-tests-pelesjak"
+DEFAULT_EXPERIMENT_NAME = "pelesjak-deep-db-tests"
 
 RANDOM_SEED = 42
 
@@ -86,6 +86,8 @@ def prepare_run(config: tune.TuneConfig):
 
 def train_model(config: tune.TuneConfig):
     print(f"Cuda available: {torch.cuda.is_available()}")
+    log_dir = config.pop("log_dir", None)
+    data_dir = config.pop("data_dir", None)
     session, client, run = prepare_run(config)
 
     run_id = run.info.run_id
@@ -102,7 +104,7 @@ def train_model(config: tune.TuneConfig):
         print(f"Device: {device}")
 
         dataset = CTUDataset(
-            config["dataset"], data_dir=config.pop("shared_dir", None), force_remake=False
+            config["dataset"], data_dir=data_dir, force_remake=False
         )
 
         target = dataset.defaults.target
@@ -171,6 +173,7 @@ def train_model(config: tune.TuneConfig):
             max_epochs=config["epochs"],
             max_steps=-1,
             enable_checkpointing=False,
+            logger=False
         )
 
         trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
@@ -190,6 +193,7 @@ def run_experiment(
     dataset: CTUDatasetName,
     num_samples: int,
     useCuda=False,
+    log_dir: str = None,
     run_name: str = None,
     random_seed: int = RANDOM_SEED,
 ):
@@ -202,11 +206,13 @@ def run_experiment(
 
     time_str = datetime.now().strftime("%d-%m-%Y,%H:%M:%S")
     run_name = f"{dataset}_{time_str}" if run_name is None else run_name
+    
+    log_dir = os.path.join(os.getcwd(), "logs") if log_dir is None else os.path.abspath(log_dir)
 
     with mlflow.start_run(run_name=run_name) as run:
         client = mlflow.tracking.MlflowClient(tracking_uri)
 
-        ray.init(address=ray_address, ignore_reinit_error=True)
+        ray.init(address=ray_address, ignore_reinit_error=True, log_to_driver=False)
 
         analysis: tune.ExperimentAnalysis = tune.run(
             train_model,
@@ -216,12 +222,15 @@ def run_experiment(
             search_alg=OptunaSearch(),
             checkpoint_config=CheckpointConfig(num_to_keep=1),
             num_samples=num_samples,
-            storage_path=os.getcwd() + "/ray_results",
+            storage_path=log_dir,
             resources_per_trial=(
-                {"gpu": 1, "cpu": 1, "memory": 4_000_000_000}
+                {"gpu": 0.125, "cpu": 1, "memory": 4_000_000_000}
                 if useCuda
                 else {"cpu": 1, "memory": 4_000_000_000}
             ),
+            log_to_file=True,
+            local_dir=log_dir,
+            resume=False,
             config={
                 "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
                 "betas": [0.9, 0.999],
@@ -234,7 +243,8 @@ def run_experiment(
                 "epochs": 4000,
                 "device": "cuda" if useCuda else "cpu",
                 "seed": random_seed,
-                "shared_dir": os.path.join(os.getcwd(), "datasets"),
+                "data_dir": os.path.join(os.getcwd(), "datasets"),
+                "log_dir": log_dir,
                 "mlflow_config": {
                     "client": client,
                     "experiment_name": experiment_name,
@@ -261,29 +271,31 @@ def run_experiment(
         )
         print(f"Best config: {analysis.best_result}")
 
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("--ray_address", type=str, default="auto")
+    parser.add_argument(
+        "--dataset", type=str, default=DEFAULT_DATASET_NAME, choices=get_args(CTUDatasetName)
+    )
+    parser.add_argument("--cuda", default=False, action="store_true")
+    parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
+    parser.add_argument("--run_name", type=str, default=None)
+    parser.add_argument("--num_samples", type=int, default=1)
+    parser.add_argument("--log_dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
 
-parser = ArgumentParser()
-parser.add_argument(
-    "--dataset", type=str, default=DEFAULT_DATASET_NAME, choices=get_args(CTUDatasetName)
-)
+    args = parser.parse_args()
+    print(args)
 
-parser.add_argument("--ray_address", type=str, default="auto")
-parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
-parser.add_argument("--num_samples", type=int, default=1)
-parser.add_argument("--cuda", default=False, action="store_true")
-parser.add_argument("--run_name", type=str, default=None)
-parser.add_argument("--seed", type=int, default=RANDOM_SEED)
+    run_experiment(
+        args.ray_address,
+        "http://147.32.83.171:2222",
+        args.experiment,
+        args.dataset,
+        args.num_samples,
+        args.cuda,
+        args.log_dir,
+        args.run_name,
+        args.seed,
+    )
 
-args = parser.parse_args()
-print(args)
-
-run_experiment(
-    args.ray_address,
-    "http://147.32.83.171:2222",
-    args.experiment,
-    args.dataset,
-    args.num_samples,
-    args.cuda,
-    args.run_name,
-    args.seed,
-)
