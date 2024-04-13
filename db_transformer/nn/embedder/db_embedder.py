@@ -61,7 +61,7 @@ class TableEmbedder(StypeWiseFeatureEncoder):
             xs.append(x)
             all_col_names.extend(col_names)
         if len(xs) == 0:
-            x = torch.zeros((tf.num_rows, 1, self.embed_dim), dtype=torch.float32)
+            x = torch.zeros((tf.num_rows, 1, self.embed_dim), dtype=torch.float32).to(tf.device)
         else:
             x = torch.cat(xs, dim=1)
         return x, all_col_names
