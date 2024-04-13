@@ -218,7 +218,7 @@ class CTUDataset:
             data[table_name].tf = dataset.tensor_frame.to(device)
             data[table_name].col_stats = dataset.col_stats
             if table_name == self.defaults.target_table:
-                data[table_name].y = dataset.tensor_frame.y
+                data[table_name].y = dataset.tensor_frame.y.to(device)
 
         # add reverse edges
         data: HeteroData = T.ToUndirected()(data)
