@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 import lightning as L
+from lightning.pytorch import seed_everything
 
 from torch_geometric.data import HeteroData
 from torch_geometric.loader import NeighborLoader
@@ -101,9 +102,7 @@ def train_model(config: tune.TuneConfig):
         )
         print(f"Device: {device}")
 
-        dataset = CTUDataset(
-            config["dataset"], data_dir=data_dir, force_remake=False
-        )
+        dataset = CTUDataset(config["dataset"], data_dir=data_dir, force_remake=False)
 
         target = dataset.defaults.target
 
@@ -114,6 +113,12 @@ def train_model(config: tune.TuneConfig):
             split="train_rest", num_val=int(0.30 * n_total), num_test=0
         )(data)
 
+        total_samples = data[target[0]].y.shape[0]
+
+        min_batch_size = max(16, int(2 ** np.around(np.log2(total_samples / 100))))
+        batch_size = min(min_batch_size * 2 ** config["batch_size_scale"], 2048)
+        client.log_param(run_id, "batch_size", batch_size)
+
         num_neighbors = {
             edge_type: [30] * 5
             for edge_type in data.collect("edge_index", allow_empty=True).keys()
@@ -122,17 +127,19 @@ def train_model(config: tune.TuneConfig):
         train_loader = NeighborLoader(
             data,
             num_neighbors=num_neighbors,
-            batch_size=512,
+            batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].train_mask),
             subgraph_type="bidirectional",
+            shuffle=True,
         )
 
         val_loader = NeighborLoader(
             data,
             num_neighbors=num_neighbors,
-            batch_size=512,
+            batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].val_mask),
             subgraph_type="bidirectional",
+            shuffle=True,
         )
 
         edge_types = list(data.collect("edge_index", allow_empty=True).keys())
@@ -159,19 +166,41 @@ def train_model(config: tune.TuneConfig):
             verbose=False,
         ).to(device)
 
+        seed_everything(config["seed"], workers=True)
+
+        metric = config["metric"]
+
         trainer = L.Trainer(
             accelerator=device.type,
             devices=1,
             deterministic=True,
             callbacks=[
-                BestMetricsLoggerCallback(),
-                MLFlowLoggerCallback(run_id, client, session),
+                BestMetricsLoggerCallback(monitor=f"val_{metric}"),
+                MLFlowLoggerCallback(
+                    run_id,
+                    client,
+                    session,
+                    metrics=[
+                        "train_loss",
+                        "best_train_loss",
+                        "val_loss",
+                        "best_val_loss",
+                        "test_loss",
+                        "best_test_loss",
+                        f"train_{metric}",
+                        f"best_train_{metric}",
+                        f"val_{metric}",
+                        f"best_val_{metric}",
+                        f"test_{metric}",
+                        f"best_test_{metric}",
+                    ],
+                ),
             ],
-            max_time=timedelta(hours=12),
+            max_time=timedelta(hours=2),
             max_epochs=config["epochs"],
-            max_steps=-1,
+            max_steps=config["epochs"] * 2,
             enable_checkpointing=False,
-            logger=False
+            logger=False,
         )
 
         trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
@@ -191,6 +220,8 @@ def run_experiment(
     useCuda=False,
     log_dir: str = None,
     run_name: str = None,
+    epochs: int = 500,
+    metric: str = None,
     random_seed: int = RANDOM_SEED,
 ):
     random.seed(random_seed)
@@ -202,8 +233,10 @@ def run_experiment(
 
     time_str = datetime.now().strftime("%d-%m-%Y,%H:%M:%S")
     run_name = f"{dataset}_{time_str}" if run_name is None else run_name
-    
-    log_dir = os.path.join(os.getcwd(), "logs") if log_dir is None else os.path.abspath(log_dir)
+
+    log_dir = (
+        os.path.join(os.getcwd(), "logs") if log_dir is None else os.path.abspath(log_dir)
+    )
 
     with mlflow.start_run(run_name=run_name) as run:
         client = mlflow.tracking.MlflowClient(tracking_uri)
@@ -213,14 +246,14 @@ def run_experiment(
         analysis: tune.ExperimentAnalysis = tune.run(
             train_model,
             verbose=1,
-            metric="best_val_acc",
+            metric=f"best_val_{metric}",
             mode="max",
             search_alg=OptunaSearch(),
             checkpoint_config=CheckpointConfig(num_to_keep=1),
             num_samples=num_samples,
             storage_path=log_dir,
             resources_per_trial=(
-                {"gpu": 0.125, "cpu": 1, "memory": 4_000_000_000}
+                {"gpu": 0.25, "cpu": 1, "memory": 4_000_000_000}
                 if useCuda
                 else {"cpu": 1, "memory": 4_000_000_000}
             ),
@@ -228,15 +261,17 @@ def run_experiment(
             local_dir=log_dir,
             resume=False,
             config={
-                "lr": 0.0001,  # tune.loguniform(0.00005, 0.001),
+                "lr": tune.loguniform(0.00005, 0.001, base=10),
                 "betas": [0.9, 0.999],
                 "embed_dim": tune.choice([32, 64]),
                 "aggr": tune.choice(["sum"]),
                 "gnn_layers": tune.randint(1, 5),
                 "mlp_dims": tune.choice([[], [64], [64, 64]]),
                 "batch_norm": tune.choice([True, False]),
+                "batch_size_scale": tune.randint(0, 8),
                 "dataset": dataset,
-                "epochs": 4000,
+                "epochs": epochs,
+                "metric": metric,
                 "device": "cuda" if useCuda else "cpu",
                 "seed": random_seed,
                 "data_dir": os.path.join(os.getcwd(), "datasets"),
@@ -267,11 +302,15 @@ def run_experiment(
         )
         print(f"Best config: {analysis.best_result}")
 
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--ray_address", type=str, default="auto")
     parser.add_argument(
-        "--dataset", type=str, default=DEFAULT_DATASET_NAME, choices=get_args(CTUDatasetName)
+        "--dataset",
+        type=str,
+        default=DEFAULT_DATASET_NAME,
+        choices=get_args(CTUDatasetName),
     )
     parser.add_argument("--cuda", default=False, action="store_true")
     parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
@@ -279,6 +318,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_samples", type=int, default=1)
     parser.add_argument("--log_dir", type=str, default=None)
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--metric", type=str, default="acc")
 
     args = parser.parse_args()
     print(args)
@@ -292,6 +333,7 @@ if __name__ == "__main__":
         args.cuda,
         args.log_dir,
         args.run_name,
+        args.epochs,
+        args.metric,
         args.seed,
     )
-
