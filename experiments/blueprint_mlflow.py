@@ -1,8 +1,6 @@
 from argparse import ArgumentParser
 from datetime import datetime, timedelta
-import math
 import os, sys
-import traceback
 
 sys.path.append(os.getcwd())
 
@@ -179,10 +177,8 @@ def train_model(config: tune.TuneConfig):
         trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
         client.set_terminated(run_id)
 
-    except Exception:
-        err = traceback.format_exc(limit=100)
-        print(f"Error: {err}")
-        client.set_tag(run_id, "exception", err)
+    except Exception as e:
+        client.set_tag(run_id, "exception", str(e))
         client.set_terminated(run_id, "FAILED")
 
 
