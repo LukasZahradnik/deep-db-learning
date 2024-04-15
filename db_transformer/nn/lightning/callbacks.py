@@ -25,8 +25,17 @@ class BestMetricsLoggerCallback(L.Callback):
         self.metrics = metrics
         self.best_value: Optional[float] = None
         self.verbose = verbose
-
-    def on_train_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        
+    def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        if self.cmp == "min":
+            trainer.callback_metrics[self.monitor] = 10_000_000
+            trainer.callback_metrics[f"best_{self.monitor}"] = 10_000_000
+            
+        if self.cmp == "max":
+            trainer.callback_metrics[self.monitor] = 0
+            trainer.callback_metrics[f"best_{self.monitor}"] = 0
+            
+    def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         if self.monitor not in trainer.callback_metrics:
             return
 
@@ -82,8 +91,19 @@ class MLFlowLoggerCallback(L.Callback):
             ]
             # fmt:on
         self.metrics = metrics
+        
+    def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        metric_dict = {}
 
-    def on_train_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        for metric_name in self.metrics:
+            if metric_name not in trainer.callback_metrics:
+                continue
+            metric_dict[metric_name] = (
+                trainer.callback_metrics[metric_name]
+            )
+        self.ray_session.report(metric_dict)
+
+    def on_test_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         metric_dict = {}
         mlflow_metrics = []
         timestamp = int(datetime.now().timestamp() * 1000)
