@@ -106,7 +106,7 @@ def train_model(config: tune.TuneConfig):
 
         target = dataset.defaults.target
 
-        data = dataset.build_hetero_data(device, force_rematerilize=False)
+        data = dataset.build_hetero_data(force_rematerilize=False)
 
         n_total = data[dataset.defaults.target_table].y.shape[0]
         data: HeteroData = T.RandomNodeSplit(
