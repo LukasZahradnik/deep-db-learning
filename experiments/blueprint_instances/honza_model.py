@@ -11,8 +11,7 @@ from torch_frame.nn import encoder
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
-from db_transformer.nn import EmbeddingTranscoder
-from db_transformer.nn import BlueprintModel
+from db_transformer.nn import EmbeddingTranscoder, BlueprintModel
 
 
 def create_honza_model(

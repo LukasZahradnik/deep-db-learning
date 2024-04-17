@@ -175,7 +175,18 @@ def train_model(config: tune.TuneConfig):
             devices=1,
             deterministic=True,
             callbacks=[
-                BestMetricsLoggerCallback(monitor=f"val_{metric}"),
+                BestMetricsLoggerCallback(
+                    monitor=f"val_{metric}",
+                    cmp="max" if metric == "acc" else "min",
+                    metrics=[
+                        "train_loss",
+                        "val_loss",
+                        "test_loss",
+                        f"train_{metric}",
+                        f"val_{metric}",
+                        f"test_{metric}",
+                    ],
+                ),
                 MLFlowLoggerCallback(
                     run_id,
                     client,
@@ -198,6 +209,7 @@ def train_model(config: tune.TuneConfig):
             ],
             max_time=timedelta(hours=2),
             max_epochs=config["epochs"],
+            min_epochs=2,
             max_steps=config["epochs"] * 2,
             enable_checkpointing=False,
             logger=False,

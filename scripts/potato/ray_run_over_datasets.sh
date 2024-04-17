@@ -1,11 +1,8 @@
 #!/bin/bash
 
-run_timeout=$(expr 60 \* 60 \* 24) # 24 hours
-# run_timeout=$(expr 60 ) # 24 hours
-
 conda_env="deep-db-learning"
 
-datasets=('Accidents' 'AdventureWorks2014' 'Airline' 'Atherosclerosis' 'AustralianFootball' 'Basketball_men'
+all_datasets=('Accidents' 'AdventureWorks2014' 'Airline' 'Atherosclerosis' 'AustralianFootball' 'Basketball_men'
     'Basketball_women' 'Biodegradability' 'Bupa' 'Carcinogenesis' 'ccs' 'CDESchools' 'Chess' 'CiteSeer'
     'classicmodels' 'ConsumerExpenditures' 'CORA' 'Countries' 'CraftBeer' 'Credit' 'cs' 'Dallas' 'DCG'
     'Dunur' 'Elti' 'employee' 'ErgastF1' 'Facebook' 'financial' 'FNHK' 'ftp' 'geneea' 'genes' 'GOSales'
@@ -17,24 +14,36 @@ datasets=('Accidents' 'AdventureWorks2014' 'Airline' 'Atherosclerosis' 'Australi
     'voc' 'Walmart' 'WebKP' 'world'
 )
 
+
 cls_datasets=('Accidents' 'Airline' 'Atherosclerosis' 'AustralianFootball' 
     'Basketball_women' 'Bupa' 'Carcinogenesis' 'Chess' 'CiteSeer' 'CORA'
     'CraftBeer' 'Credit' 'cs' 'Dallas' 'DCG' 'Dunur' 'Elti' 'ErgastF1' 
     'Facebook' 'financial' 'ftp' 'geneea' 'genes' 'Hepatitis_std' 'Hockey' 
-    'imdb_ijs' 'KRK' 'legalActs' 'Mesh' 'Mondial' 'imdb_MovieLens' 'medical'
+    'imdb_ijs' 
+    'KRK' 
+    'legalActs' 'Mesh' 'Mondial' 'imdb_MovieLens' 'medical'
     'MuskSmall' 'mutagenesis' 'nations' 'NBA' 'NCAA' 'Pima' 'PremierLeague'
     'PTE' 'PubMed_Diabetes' 'Same_gen' 'SAP' 'SAT' 'Student_loan' 'Toxicology' 
-    'tpcc' 'tpcd' 'tpcds' 'trains' 'university' 'UTube' 'UW_std' 'voc' 'WebKP' 'world'
+    'tpcc' 'tpcd' 'tpcds' 
+    'trains' 'university' 'UTube' 'UW_std' 'voc' 'WebKP' 'world'
+)
+
+cls_orig_datasets=('Atherosclerosis' 'Carcinogenesis' 'Chess' 'CiteSeer'
+    'cs' 'DCG' 'Dunur' 'MuskSmall' 'mutagenesis' 'NCAA' 'Pima' 'PTE' 
+    'Toxicology' 'university' 'UTube' 'WebKP'
 )
 
 reg_datasets=('AdventureWorks2014' 'Basketball_men' 'Biodegradability' 'ccs'
-    'CDESchools' 'classicmodels' 'ConsumerExpenditures' 'Countries' 'employee'
-    'FNHK' 'GOSales' 'Grants' 'lahman_2014' 'northwind' 'PTC' 'pubs' 'Pyrimidine'
-    'restbase' 'sakila' 'SalesDB' 'Seznam' 'SFScores' 'stats' 'tpch' 'Triazine'
+    # 'CDESchools' 
+    'classicmodels' 'ConsumerExpenditures' 'Countries' 'employee'
+    'FNHK' 'GOSales' 'Grants' 'lahman_2014' 'northwind' 
+    # 'PTC' 
+    'pubs' 'Pyrimidine'
+    'restbase' 'sakila' 'SalesDB' 'Seznam' 'SFScores' 'stats' 
+    # 'tpch' 
+    'Triazine'
     'Walmart'
 )
-
-try_datasets=('Chess' 'CORA' 'mutagenesis')
 
 NAME=$1
 if [[ -z "$NAME" ]]; then
@@ -63,27 +72,39 @@ echo "ray head address is $ip_head"
 sleep 10
 echo "ray dashboard available at http://$ip_dashboard"
 
-
 ray status --address=$ip_head
 
-download_runs=()
-for d in ${cls_datasets[@]}; do
-    mkdir logs/$id/$d
-    python -u scripts/download_dataset.py --dataset=$d &> "logs/$id/$d/download.log" &
-    download_runs+=($!)
-    sleep 5
-done
+run_timeout=$(expr 60 \* 60 \* 24) # 24 hours
 
-for run_pid in ${download_runs[@]}; do
-    wait $run_pid
-done
+datasets=${reg_datasets[@]}
+# datasets=${cls_orig_datasets[@]}
+# datasets=('cs')
+
+experiment_suffix="honza"
+num_samples=4
+epochs=2000
+metric="nrmse" # "acc"
+
+# download_runs=()
+# for d in ${datasets[@]}; do
+#     mkdir logs/$id/$d
+#     python -u scripts/download_dataset.py --dataset=$d &> "logs/$id/$d/download.log" &
+#     download_runs+=($!)
+#     sleep 5
+# done
+
+# for run_pid in ${download_runs[@]}; do
+#     wait $run_pid
+# done
 
 dataset_runs=()
-for d in ${cls_datasets[@]}; do
-    python -u experiments/blueprint_mlflow.py --ray_address=$ip_head \
-    --experiment=pelesjak-deep-db-experiments-v2-honza --log_dir=logs/$id/$d --run_name=${id}_${d} \
-    --cuda --dataset=$d --num_samples=8 &> "logs/$id/$d/run.log" &
+for d in ${datasets[@]}; do
+    mkdir logs/$id/$d
+    python -u experiments/blueprint_mlflow.py --ray_address=$ip_head --log_dir=logs/$id/$d \
+    --experiment=pelesjak-deep-db-experiments-v2-${experiment_suffix} --run_name=${id}_${d} \
+    --cuda --dataset=$d --num_samples=${num_samples} --epochs=${epochs} --metric=${metric} &> "logs/$id/$d/run.log" &
     dataset_runs+=($!)
+    sleep 5
 done
 
 function timeout_monitor() {
