@@ -240,6 +240,8 @@ class BlueprintModel(torch.nn.Module):
                     )
                 )
 
+        if len(layers) == 0:
+            layers.append((torch.nn.Identity(), "x_dict_0 -> x_dict"))
         self.hetero_gnn = Sequential("x_dict_0, edge_dict", layers)
 
         self.decoder_aggregation = decoder_aggregation

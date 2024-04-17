@@ -1,6 +1,7 @@
 from typing import Dict, Optional, Tuple
 
 import torch
+from torch.nn import functional as F
 
 import lightning as L
 
@@ -46,16 +47,24 @@ class LightningWrapper(L.LightningModule):
                     .type(torch.float)
                     .mean()
                 )
+            if task_type == TaskType.REGRESSION:
+                metrics["nrmse"] = (
+                    lambda out, target: torch.sqrt(
+                        F.mse_loss(out, target, reduction="mean")
+                    )
+                    / target.mean()
+                )
 
         self.loss_module = loss_module
         self.metrics = metrics
 
     def forward(self, data: HeteroData, mode: str = "train"):
-        out = self.model(
+        out: torch.Tensor = self.model(
             data.collect(self.data_key), data.collect("edge_index", allow_empty=True)
         )
+        out = out.squeeze(dim=-1)
 
-        target = data[self.target_table].y
+        target: torch.Tensor = data[self.target_table].y
 
         loss = self.loss_module(out, target)
 

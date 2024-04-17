@@ -11,8 +11,9 @@ from torch_frame.nn import encoder
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
-from db_transformer.nn import EmbeddingTranscoder
-from db_transformer.nn import BlueprintModel
+from db_transformer.nn import EmbeddingTranscoder, BlueprintModel
+
+from .utils import get_decoder
 
 
 def create_honza_model(
@@ -28,6 +29,7 @@ def create_honza_model(
     embed_dim = config.get("embed_dim", 64)
     gnn_layers = config.get("gnn_layers", 1)
     batch_norm = config.get("batch_norm", False)
+    mlp_dims = config.get("mlp_dims", [])
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
 
@@ -36,21 +38,6 @@ def create_honza_model(
         if is_classification
         else 1
     )
-
-    def get_decoder(out_gnn):
-        mlp_dims = config.get("mlp_dims", [])
-
-        mlp_dims = [out_gnn, *mlp_dims, output_dim]
-
-        mlp_layers = []
-        for i in range(len(mlp_dims) - 1):
-            if i > 0:
-                if batch_norm:
-                    mlp_layers.append(torch.nn.BatchNorm1d(mlp_dims[i]))
-                mlp_layers.append(torch.nn.ReLU())
-            mlp_layers.append(torch.nn.Linear(mlp_dims[i], mlp_dims[i + 1]))
-
-        return torch.nn.Sequential(*mlp_layers)
 
     return BlueprintModel(
         target=target,
@@ -65,7 +52,6 @@ def create_honza_model(
             stype.numerical: encoder.LinearEncoder(
                 na_strategy=NAStrategy.MEAN,
             ),
-            # stype.embedding: EmbeddingTranscoder(),
         },
         positional_encoding=False,
         per_column_embedding=False,
@@ -87,15 +73,17 @@ def create_honza_model(
         table_transform_unique=True,
         table_combination=lambda i, edge, cols: conv.SAGEConv(
             (
-                len(cols[0]) * int(embed_dim / 2**i),
-                len(cols[1]) * int(embed_dim / 2**i),
+                len(cols[0]) * embed_dim // 2**i,
+                len(cols[1]) * embed_dim // 2**i,
             ),
-            len(cols[1]) * int(embed_dim / 2 ** (i + 1)),
+            len(cols[1]) * embed_dim // 2 ** (i + 1),
             aggr="sum",
         ),
         table_combination_unique=True,
         decoder_aggregation=torch.nn.Identity(),
-        decoder=lambda cols: get_decoder(len(cols) * int(embed_dim / 2**gnn_layers)),
+        decoder=lambda cols: get_decoder(
+            len(cols) * embed_dim // 2**gnn_layers, output_dim, mlp_dims, batch_norm
+        ),
         output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
         table_transform_dropout=0.0,
