@@ -116,7 +116,7 @@ def train_model(config: tune.TuneConfig):
         total_samples = data[target[0]].y.shape[0]
 
         min_batch_size = max(16, int(2 ** np.around(np.log2(total_samples / 100))))
-        batch_size = min(min_batch_size * 2 ** config["batch_size_scale"], 2048)
+        batch_size = min(min_batch_size * 2 ** config["batch_size_scale"], 16384)
         client.log_param(run_id, "batch_size", batch_size)
 
         num_neighbors = {
