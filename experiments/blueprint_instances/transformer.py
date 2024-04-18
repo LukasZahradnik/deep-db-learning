@@ -27,6 +27,7 @@ def create_transformer_model(
     target = defaults.target
 
     embed_dim = config.get("embed_dim", 64)
+    encoder = config.get("encoder", "basic")
     gnn_layers = config.get("gnn_layers", 1)
     batch_norm = config.get("batch_norm", False)
     mlp_dims = config.get("mlp_dims", [])
@@ -48,7 +49,7 @@ def create_transformer_model(
         col_stats_per_table=col_stats_dict,
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
-        stype_encoder_dict=get_encoder("basic"),
+        stype_encoder_dict=get_encoder(encoder),
         positional_encoding=False,
         per_column_embedding=True,
         num_gnn_layers=gnn_layers,

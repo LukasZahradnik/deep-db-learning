@@ -63,10 +63,10 @@ def create_honza_model(
         table_transform_unique=True,
         table_combination=lambda i, edge, cols: conv.SAGEConv(
             (
-                len(cols[0]) * embed_dim // 2**i,
-                len(cols[1]) * embed_dim // 2**i,
+                len(cols[0]) * (embed_dim // 2**i),
+                len(cols[1]) * (embed_dim // 2**i),
             ),
-            len(cols[1]) * embed_dim // 2 ** (i + 1),
+            len(cols[1]) * (embed_dim // 2 ** (i + 1)),
             aggr="sum",
         ),
         table_combination_unique=True,
