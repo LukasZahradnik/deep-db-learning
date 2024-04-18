@@ -25,6 +25,7 @@ df_data: Dict[str, List[Any]] = dict(
     total_n_tuples=[],
     total_n_edges=[],
     total_ratio_edges_tuples=[],
+    task=[],
 )
 for dataset_name in CTU_REPOSITORY_DEFAULTS:
     try:
@@ -40,7 +41,7 @@ for dataset_name in CTU_REPOSITORY_DEFAULTS:
 
         df_data["dataset"].append(dataset.name)
         df_data["n_relations"].append(len(tf_dict))
-        df_data["n_edge_types"].append(len(edge_dict))
+        df_data["n_edge_types"].append(len(edge_dict) // 2)
         df_data["n_target_tuples"].append(target_table.num_rows)
         df_data["n_target_attributes"].append(target_table.num_cols)
         df_data["avg_target_edges"].append(
@@ -52,6 +53,7 @@ for dataset_name in CTU_REPOSITORY_DEFAULTS:
         df_data["total_ratio_edges_tuples"].append(
             df_data["total_n_edges"][-1] / df_data["total_n_tuples"][-1]
         )
+        df_data["task"].append(dataset.defaults.task.to_type())
     except Exception as e:
         print(f"Error processing {dataset_name}: {e}")
 
@@ -59,4 +61,4 @@ df = pd.DataFrame(df_data)
 
 print(df)
 
-df.to_csv("./datasets/info.csv")
+df.to_csv("./datasets/info.csv", index=False)
