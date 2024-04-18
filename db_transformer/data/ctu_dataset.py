@@ -219,6 +219,10 @@ class CTUDataset:
             data[table_name].col_stats = dataset.col_stats
             if table_name == self.defaults.target_table:
                 data[table_name].y = dataset.tensor_frame.y.to(device)
+                if self.defaults.task == TaskType.CLASSIFICATION:
+                    data[table_name].y = data[table_name].y.long()
+                if self.defaults.task == TaskType.REGRESSION:
+                    data[table_name].y = data[table_name].y.float()
 
         # add reverse edges
         data: HeteroData = T.ToUndirected()(data)
