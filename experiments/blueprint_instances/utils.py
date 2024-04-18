@@ -1,6 +1,36 @@
-from typing import List
+from typing import Dict, List, Literal, Optional
 
 import torch
+
+from torch_frame import stype, NAStrategy
+from torch_frame.nn import encoder
+
+from db_transformer.nn import EmbeddingTranscoder
+
+
+def get_encoder(
+    type: Optional[Literal["basic", "with_embeddings"]] = None
+) -> Dict[stype, encoder.StypeEncoder]:
+    if type == "basic" or type is None:
+        return {
+            stype.categorical: encoder.EmbeddingEncoder(
+                na_strategy=NAStrategy.MOST_FREQUENT,
+            ),
+            stype.numerical: encoder.LinearEncoder(
+                na_strategy=NAStrategy.MEAN,
+            ),
+        }
+    if type == "with_embeddings" or type is None:
+        return {
+            stype.categorical: encoder.EmbeddingEncoder(
+                na_strategy=NAStrategy.MOST_FREQUENT,
+            ),
+            stype.numerical: encoder.LinearEncoder(
+                na_strategy=NAStrategy.MEAN,
+            ),
+            stype.embedding: EmbeddingTranscoder(),
+        }
+    raise ValueError(f"Unknown encoder type '{type}'")
 
 
 def get_decoder(out_gnn: int, output_dim: int, mlp_dims: List[int] = [], batch_norm=False):
