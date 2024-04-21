@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import warnings
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -19,10 +19,11 @@ import torch
 
 import torch_geometric.transforms as T
 from torch_geometric.data import HeteroData
+from torch_geometric.typing import NodeType
 
 import torch_frame
 from torch_frame.config import TextEmbedderConfig
-from torch_frame.data import Dataset
+from torch_frame.data import Dataset, StatType
 from torch_frame.utils import infer_series_stype
 
 from relbench.data import Database, Table
@@ -102,8 +103,9 @@ class CTUDataset:
         device: str = None,
         force_rematerilize: bool = False,
         no_text_emebedding: bool = False,
-    ) -> HeteroData:
+    ) -> Tuple[HeteroData, Dict[NodeType, Dict[str, Dict[StatType, Any]]]]:
         data = HeteroData()
+        col_stats_dict = {}
 
         # get all tables
         table_dfs = {
@@ -216,18 +218,18 @@ class CTUDataset:
             print(f"Table {table_name} has stypes:\n{stype_to_col_str}")
 
             data[table_name].tf = dataset.tensor_frame.to(device)
-            data[table_name].col_stats = dataset.col_stats
+            col_stats_dict[table_name] = dataset.col_stats
             if table_name == self.defaults.target_table:
                 data[table_name].y = dataset.tensor_frame.y.to(device)
                 if self.defaults.task == TaskType.CLASSIFICATION:
-                    data[table_name].y = data[table_name].y.long()
+                    data[table_name].y = data[table_name].y
                 if self.defaults.task == TaskType.REGRESSION:
                     data[table_name].y = data[table_name].y.float()
 
         # add reverse edges
         data: HeteroData = T.ToUndirected()(data)
 
-        return data
+        return data, col_stats_dict
 
     @classmethod
     def get_url(cls, dataset: CTUDatasetName) -> str:

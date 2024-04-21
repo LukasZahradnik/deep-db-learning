@@ -31,7 +31,9 @@ for dataset_name in CTU_REPOSITORY_DEFAULTS:
     try:
         dataset = CTUDataset(dataset_name, data_dir="./datasets", force_remake=False)
 
-        data = dataset.build_hetero_data(force_rematerilize=False, no_text_emebedding=False)
+        data, col_stats_dict = dataset.build_hetero_data(
+            force_rematerilize=False, no_text_emebedding=False
+        )
 
         target = dataset.defaults.target
 

@@ -106,7 +106,7 @@ def train_model(config: tune.TuneConfig):
 
         target = dataset.defaults.target
 
-        data = dataset.build_hetero_data(force_rematerilize=False)
+        data, col_stats_dict = dataset.build_hetero_data(force_rematerilize=False)
 
         n_total = data[dataset.defaults.target_table].y.shape[0]
         data: HeteroData = T.RandomNodeSplit(
@@ -153,7 +153,7 @@ def train_model(config: tune.TuneConfig):
                 if tf.num_rows > 0
             },
             edge_types,
-            data.collect("col_stats"),
+            col_stats_dict,
             config,
         )
 
