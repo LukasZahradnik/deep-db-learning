@@ -1,24 +1,19 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
 import torch
 
 from torch_geometric.typing import NodeType, EdgeType
-from torch_geometric.nn import conv
-from torch_geometric.data import HeteroData
 
-from torch_frame import stype, NAStrategy
-from torch_frame.nn import encoder
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
 from db_transformer.nn import (
-    EmbeddingTranscoder,
     BlueprintModel,
     CrossAttentionConv,
     SelfAttention,
 )
 
-from .utils import get_decoder
+from .utils import get_decoder, get_encoder
 
 
 def create_transformer_model(
@@ -32,6 +27,7 @@ def create_transformer_model(
     target = defaults.target
 
     embed_dim = config.get("embed_dim", 64)
+    encoder = config.get("encoder", "basic")
     gnn_layers = config.get("gnn_layers", 1)
     batch_norm = config.get("batch_norm", False)
     mlp_dims = config.get("mlp_dims", [])
@@ -53,14 +49,7 @@ def create_transformer_model(
         col_stats_per_table=col_stats_dict,
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
-        stype_encoder_dict={
-            stype.categorical: encoder.EmbeddingEncoder(
-                na_strategy=NAStrategy.MOST_FREQUENT,
-            ),
-            stype.numerical: encoder.LinearEncoder(
-                na_strategy=NAStrategy.MEAN,
-            ),
-        },
+        stype_encoder_dict=get_encoder(encoder),
         positional_encoding=False,
         per_column_embedding=True,
         num_gnn_layers=gnn_layers,

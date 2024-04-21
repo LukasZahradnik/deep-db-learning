@@ -76,6 +76,8 @@ class BlueprintModel(torch.nn.Module):
                 if stype not in self.embedded_stypes:
                     continue
                 self.embedded_cols[node].extend(cols)
+            if len(self.embedded_cols[node]) == 0:
+                self.embedded_cols[node] = ["__filler"]
 
         embedder_layers: List[Tuple[str, torch.nn.Module]] = []
 

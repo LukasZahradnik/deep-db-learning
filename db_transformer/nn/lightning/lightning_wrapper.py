@@ -48,6 +48,8 @@ class LightningWrapper(L.LightningModule):
                     .mean()
                 )
             if task_type == TaskType.REGRESSION:
+                metrics["mae"] = torch.nn.L1Loss(reduction="mean")
+                metrics["mse"] = torch.nn.MSELoss(reduction="mean")
                 metrics["nrmse"] = (
                     lambda out, target: torch.sqrt(
                         F.mse_loss(out, target, reduction="mean")

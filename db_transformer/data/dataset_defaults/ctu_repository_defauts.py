@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from enum import Enum
 from typing import Callable, Literal, Dict, Optional, Tuple, Union
 
 from db_transformer.data.dataset_defaults.utils import TaskType
@@ -526,6 +525,12 @@ CTU_REPOSITORY_DEFAULTS: Dict[CTUDatasetName, CTUDatasetDefault] = {
         target_column="c_mktsegment",
         target_id="c_custkey",
         task=TaskType.CLASSIFICATION,
+        schema_fixer=lambda schema: schema.dss_lineitem.foreign_keys.extend(
+            [
+                ForeignKeyDef(["l_partkey"], "dss_part", ["p_partkey"]),
+                ForeignKeyDef(["l_suppkey"], "dss_supplier", ["s_suppkey"]),
+            ]
+        ),
     ),
     "tpcds": CTUDatasetDefault(
         target_table="customer",

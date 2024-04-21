@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import List, Dict, Literal, Optional, Any
 
+import torch
+
 import lightning as L
 
 
@@ -28,12 +30,12 @@ class BestMetricsLoggerCallback(L.Callback):
 
     def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         if self.cmp == "min":
-            trainer.callback_metrics[self.monitor] = 10_000_000
-            trainer.callback_metrics[f"best_{self.monitor}"] = 10_000_000
+            trainer.callback_metrics[self.monitor] = torch.Tensor([10_000_000])
+            trainer.callback_metrics[f"best_{self.monitor}"] = torch.Tensor([10_000_000])
 
         if self.cmp == "max":
-            trainer.callback_metrics[self.monitor] = 0
-            trainer.callback_metrics[f"best_{self.monitor}"] = 0
+            trainer.callback_metrics[self.monitor] = torch.Tensor([0])
+            trainer.callback_metrics[f"best_{self.monitor}"] = torch.Tensor([0])
 
     def on_validation_epoch_end(
         self, trainer: L.Trainer, pl_module: L.LightningModule
