@@ -173,6 +173,12 @@ class SchemaAnalyzer:
     If the fraction exceeds this threshold, marks the column as something other than categorical.
     """
 
+    MAXIMUM_CARDINALITY_THRESHOLD = 1000
+    """
+    Maximum number of cardinality that a categorical column can have.
+    This is present to limit incorrectly classified categorical columns.
+    """
+
     def __init__(
         self,
         connection: Union[Connection, DBInspector, DBInspectorInterface],
@@ -342,8 +348,11 @@ will receive the :py:class:`OmitColumnDef` type
                 # check if there are too many distinct values compared to total
                 if cardinality is None or (
                     n_nonnull is not None
-                    and cardinality / n_nonnull
-                    > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD
+                    and (
+                        cardinality / n_nonnull
+                        > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD
+                        or cardinality > self.MAXIMUM_CARDINALITY_THRESHOLD
+                    )
                 ):
                     if not must_have_type and self.ID_NAME_REGEX.search(column):
                         return OmitColumnDef
@@ -363,8 +372,11 @@ will receive the :py:class:`OmitColumnDef` type
                 # check if there are too many distinct values compared to total
                 if cardinality is None or (
                     n_nonnull is not None
-                    and cardinality / n_nonnull
-                    > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD
+                    and (
+                        cardinality / n_nonnull
+                        > self.FRACTION_COUNT_DISTINCT_TO_COUNT_NONNULL_IGNORE_THRESHOLD
+                        or cardinality > self.MAXIMUM_CARDINALITY_THRESHOLD
+                    )
                 ):
                     if not must_have_type and self.ID_NAME_REGEX.search(column):
                         return OmitColumnDef
