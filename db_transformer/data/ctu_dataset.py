@@ -133,7 +133,7 @@ class CTUDataset:
             # convert all foreign keys
             for fk_def in table_schema.foreign_keys:
                 ref_df = table_dfs[fk_def.ref_table]
-                id = table_name, "-".join(fk_def.columns), fk_def.ref_table
+                id = (table_name, "fk-" + "-".join(fk_def.columns), fk_def.ref_table)
                 try:
                     data[id].edge_index = self._fk_to_index(fk_def, df, ref_df, device)
                 except Exception as e:
