@@ -64,3 +64,17 @@ df = pd.DataFrame(df_data)
 print(df)
 
 df.to_csv("./datasets/info.csv", index=False)
+
+df["size"] = ""
+df.loc[df["n_target_tuples"].between(0, 1000), "size"] = "0-1000"
+df.loc[df["n_target_tuples"].between(1001, 10000), "size"] = "1001-10000"
+df.loc[df["n_target_tuples"].between(10001, 100000), "size"] = "10001-100000"
+df.loc[df["n_target_tuples"].between(100001, 1000000), "size"] = "100001-1000000"
+df.loc[df["n_target_tuples"].between(1000001, 10000000), "size"] = "1000001-10000000"
+
+
+print("tiny:", df.loc[df["size"] == "0-1000"]["dataset"].values)
+print("small:", df.loc[df["size"] == "1001-10000"]["dataset"].values)
+print("medium:", df.loc[df["size"] == "10001-100000"]["dataset"].values)
+print("big:", df.loc[df["size"] == "100001-1000000"]["dataset"].values)
+print("giant:", df.loc[df["size"] == "1000001-10000000"]["dataset"].values)

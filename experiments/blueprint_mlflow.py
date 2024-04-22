@@ -4,7 +4,7 @@ import os, sys
 
 sys.path.append(os.getcwd())
 
-from typing import List, Dict, Literal, Union, Optional, Any, Tuple, get_args
+from typing import get_args
 
 import random
 
@@ -16,20 +16,13 @@ import lightning as L
 from lightning.pytorch import seed_everything
 
 from torch_geometric.data import HeteroData
-from torch_geometric.loader import NeighborLoader
-from torch_geometric.nn import conv, Sequential, summary
+from torch_geometric.loader import NeighborLoader, HGTLoader
 import torch_geometric.transforms as T
-from torch_geometric.typing import EdgeType, NodeType
 
-import torch_frame
-from torch_frame import stype, NAStrategy
-from torch_frame.nn import encoder
-from torch_frame.nn import TabTransformerConv
-from torch_frame.data import StatType
 
 import mlflow
 from mlflow.tracking import MlflowClient
-from mlflow.entities import Run, RunStatus, Param
+from mlflow.entities import Param
 from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 
 import ray
@@ -54,6 +47,8 @@ DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 DEFAULT_EXPERIMENT_NAME = "pelesjak-deep-db-tests"
 
 RANDOM_SEED = 42
+
+MAX_NEIGHBORS = 50
 
 
 def prepare_run(config: tune.TuneConfig):
@@ -119,23 +114,18 @@ def train_model(config: tune.TuneConfig):
         batch_size = min(min_batch_size * 2 ** config["batch_size_scale"], 16384)
         client.log_param(run_id, "batch_size", batch_size)
 
-        num_neighbors = {
-            edge_type: [30] * 5
-            for edge_type in data.collect("edge_index", allow_empty=True).keys()
-        }
-
-        train_loader = NeighborLoader(
+        train_loader = HGTLoader(
             data,
-            num_neighbors=num_neighbors,
+            num_samples=[MAX_NEIGHBORS] * config.get("gnn_layers", 1),
             batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].train_mask),
             subgraph_type="bidirectional",
             shuffle=True,
         )
 
-        val_loader = NeighborLoader(
+        val_loader = HGTLoader(
             data,
-            num_neighbors=num_neighbors,
+            num_samples=[MAX_NEIGHBORS] * config.get("gnn_layers", 1),
             batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].val_mask),
             subgraph_type="bidirectional",
@@ -145,7 +135,7 @@ def train_model(config: tune.TuneConfig):
         edge_types = list(data.collect("edge_index", allow_empty=True).keys())
 
         model = create_blueprint_model(
-            "honza",
+            config["model_type"],
             dataset.defaults,
             {
                 node: tf.col_names_dict
@@ -158,13 +148,13 @@ def train_model(config: tune.TuneConfig):
         )
 
         lightning_model = LightningWrapper(
-            model.to(device),
+            model,
             dataset.defaults.target_table,
             lr=config["lr"],
             betas=config["betas"],
             task_type=dataset.defaults.task,
             verbose=False,
-        ).to(device)
+        )
 
         seed_everything(config["seed"], workers=True)
 
@@ -232,6 +222,7 @@ def run_experiment(
     useCuda=False,
     log_dir: str = None,
     run_name: str = None,
+    model_type: str = "transformer",
     epochs: int = 500,
     metric: str = None,
     random_seed: int = RANDOM_SEED,
@@ -281,6 +272,7 @@ def run_experiment(
                 "mlp_dims": tune.choice([[], [64], [64, 64]]),
                 "batch_norm": tune.choice([True, False]),
                 "batch_size_scale": tune.randint(0, 8),
+                "model_type": model_type,
                 "dataset": dataset,
                 "epochs": epochs,
                 "metric": metric,
@@ -332,6 +324,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--metric", type=str, default="acc")
+    parser.add_argument("--model_type", type=str, default="transformer")
 
     args = parser.parse_args()
     print(args)
@@ -345,6 +338,7 @@ if __name__ == "__main__":
         args.cuda,
         args.log_dir,
         args.run_name,
+        args.model_type,
         args.epochs,
         args.metric,
         args.seed,
