@@ -35,13 +35,10 @@ class BlueprintModel(torch.nn.Module):
         positional_encoding_dropout: float = 0,
         per_column_embedding: bool = True,
         num_gnn_layers: int = 1,
-        table_transform: Optional[
+        pre_transform: Optional[
             Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
         ] = None,
-        table_transform_unique: bool = True,
-        table_transform_dropout: Optional[float] = None,
-        table_transform_residual: bool = False,
-        table_transform_norm: bool = True,
+        pre_transform_unique: bool = True,
         table_combination: Optional[
             Union[
                 torch.nn.Module,
@@ -49,9 +46,10 @@ class BlueprintModel(torch.nn.Module):
             ]
         ] = None,
         table_combination_unique: bool = True,
-        table_combination_dropout: Optional[float] = None,
-        table_combination_residual: bool = False,
-        table_combination_norm: bool = True,
+        post_transform: Optional[
+            Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
+        ] = None,
+        post_transform_unique: bool = True,
         decoder_aggregation: AggrFunction = torch.nn.Identity(),
         decoder: Optional[
             Union[torch.nn.Module, Callable[[List[str]], torch.nn.Module]]
@@ -121,15 +119,13 @@ class BlueprintModel(torch.nn.Module):
 
         layers: List[Tuple[str, torch.nn.Module]] = []
 
-        def create_table_transform(node):
-            if isinstance(table_transform, torch.nn.Module):
+        def create_pre_transform(node):
+            if isinstance(pre_transform, torch.nn.Module):
                 return (
-                    copy.deepcopy(table_transform)
-                    if table_transform_unique
-                    else table_transform
+                    copy.deepcopy(pre_transform) if pre_transform_unique else pre_transform
                 )
             else:
-                return table_transform(i, node, self.embedded_cols[node])
+                return pre_transform(i, node, self.embedded_cols[node])
 
         def create_table_combination(edge_type):
             if is_combination_module:
@@ -145,54 +141,30 @@ class BlueprintModel(torch.nn.Module):
                     (self.embedded_cols[edge_type[0]], self.embedded_cols[edge_type[2]]),
                 )
 
+        def create_post_transform(node):
+            if isinstance(post_transform, torch.nn.Module):
+                return (
+                    copy.deepcopy(post_transform)
+                    if post_transform_unique
+                    else post_transform
+                )
+            else:
+                return post_transform(i, node, self.embedded_cols[node])
+
         for i in range(num_gnn_layers):
-            if table_transform is not None:
+            if pre_transform is not None:
                 layers.append(
                     (
                         NodeApplied(
-                            create_table_transform,
+                            create_pre_transform,
                             self.node_types,
                         ),
-                        f"x_dict_{i} -> x_dict",
+                        f"x_dict_{i} -> x_dict_{i}",
                     )
                 )
-                if table_transform_dropout is None:
-                    layers.append(
-                        (
-                            NodeApplied(
-                                lambda _: torch.nn.Dropout(table_transform_dropout),
-                                self.node_types,
-                            ),
-                            "x_dict -> x_dict",
-                        )
-                    )
-                if table_transform_residual:
-                    layers.append(
-                        (
-                            NodeApplied(
-                                lambda _: lambda x1, x2: x1 + x2,
-                                self.node_types,
-                                learnable=False,
-                                dynamic_args=True,
-                            ),
-                            f"x_dict_{i}, x_dict -> x_dict",
-                        )
-                    )
-                if table_transform_norm:
-                    layers.append(
-                        (
-                            NodeApplied(
-                                lambda node: torch.nn.BatchNorm1d(
-                                    len(self.embedded_cols[node])
-                                ),
-                                self.node_types,
-                            ),
-                            "x_dict -> x_dict",
-                        )
-                    )
 
             if edge_types is None or len(edge_types) == 0:
-                layers.append((torch.nn.Identity(), f"x_dict -> x_dict_{i+1}"))
+                layers.append((torch.nn.Identity(), f"x_dict_{i} -> x_dict_{i+1}"))
                 continue
 
             if table_combination is None:
@@ -203,42 +175,15 @@ class BlueprintModel(torch.nn.Module):
                 for edge_type in self.edge_types
             }
 
-            layers.append((HeteroConv(convs), f"x_dict, edge_dict -> x_dict_{i+1}"))
+            layers.append((HeteroConv(convs), f"x_dict_{i}, edge_dict -> x_dict_{i+1}"))
 
-            if table_combination_dropout is None:
+            if post_transform is not None:
                 layers.append(
                     (
                         NodeApplied(
-                            lambda _: torch.nn.Dropout(table_combination_dropout),
-                            self.node_types,
+                            create_post_transform, self.node_types, dynamic_args=True
                         ),
-                        f"x_dict_{i+1} -> x_dict_{i+1}",
-                    )
-                )
-
-            if table_combination_residual:
-                layers.append(
-                    (
-                        NodeApplied(
-                            lambda _: lambda x1, x2: x1 + x2,
-                            self.node_types,
-                            learnable=False,
-                            dynamic_args=True,
-                        ),
-                        f"x_dict_{i+1}, x_dict -> x_dict_{i+1}",
-                    )
-                )
-
-            if table_combination_norm:
-                layers.append(
-                    (
-                        NodeApplied(
-                            lambda node: torch.nn.BatchNorm1d(
-                                len(self.embedded_cols[node])
-                            ),
-                            self.node_types,
-                        ),
-                        f"x_dict_{i+1} -> x_dict_{i+1}",
+                        f"x_dict_{i}, x_dict_{i+1} -> x_dict_{i+1}",
                     )
                 )
 

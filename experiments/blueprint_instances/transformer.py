@@ -53,11 +53,12 @@ def create_transformer_model(
         positional_encoding=False,
         per_column_embedding=True,
         num_gnn_layers=gnn_layers,
-        table_transform=lambda i, node, cols: torch.nn.Sequential(
+        pre_transform=lambda i, node, cols: Sequential(
             SelfAttention(embed_dim // 2**i, num_heads=num_heads),
             torch.nn.Linear(embed_dim // 2**i, embed_dim // 2 ** (i + 1)),
         ),
         table_transform_unique=True,
+        pre_transform_unique=True,
         table_combination=lambda i, edge, cols: CrossAttentionConv(
             embed_dim // 2 ** (i + 1), num_heads=num_heads
         ),
@@ -71,10 +72,4 @@ def create_transformer_model(
         ),
         output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
-        table_transform_dropout=dropout,
-        table_combination_dropout=dropout,
-        table_transform_residual=False,
-        table_combination_residual=residual,
-        table_transform_norm=batch_norm,
-        table_combination_norm=batch_norm,
     )

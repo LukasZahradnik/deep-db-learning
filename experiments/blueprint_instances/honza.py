@@ -46,7 +46,7 @@ def create_honza_model(
         positional_encoding=False,
         per_column_embedding=False,
         num_gnn_layers=gnn_layers,
-        table_transform=lambda i, node, cols: (
+        pre_transform=lambda i, node, cols: (
             torch.nn.Identity()
             if i == 0
             else torch.nn.Sequential(
@@ -60,7 +60,7 @@ def create_honza_model(
                 torch.nn.ReLU(),
             )
         ),
-        table_transform_unique=True,
+        pre_transform_unique=True,
         table_combination=lambda i, edge, cols: conv.SAGEConv(
             (
                 len(cols[0]) * (embed_dim // 2**i),
@@ -76,10 +76,4 @@ def create_honza_model(
         ),
         output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
-        table_transform_dropout=0.0,
-        table_combination_dropout=0.0,
-        table_transform_residual=False,
-        table_combination_residual=False,
-        table_transform_norm=False,
-        table_combination_norm=False,
     )
