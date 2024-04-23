@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 
 import torch
 
+from torch_geometric.nn import Sequential
 from torch_geometric.typing import NodeType, EdgeType
 
 from torch_frame.data import StatType
@@ -10,6 +11,7 @@ from db_transformer.data import CTUDatasetDefault, TaskType
 from db_transformer.nn import (
     BlueprintModel,
     CrossAttentionConv,
+    ResidualNorm,
     SelfAttention,
 )
 
@@ -29,10 +31,9 @@ def create_transformer_model(
     embed_dim = config.get("embed_dim", 64)
     encoder = config.get("encoder", "basic")
     gnn_layers = config.get("gnn_layers", 1)
-    batch_norm = config.get("batch_norm", False)
     mlp_dims = config.get("mlp_dims", [])
     num_heads = config.get("num_heads", 1)
-    residual = config.get("residual", False)
+    batch_norm = config.get("batch_norm", False)
     dropout = config.get("dropout", 0)
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
@@ -54,18 +55,48 @@ def create_transformer_model(
         per_column_embedding=True,
         num_gnn_layers=gnn_layers,
         pre_transform=lambda i, node, cols: Sequential(
-            SelfAttention(embed_dim // 2**i, num_heads=num_heads),
-            torch.nn.Linear(embed_dim // 2**i, embed_dim // 2 ** (i + 1)),
+            "x_dict_in",
+            [
+                (
+                    SelfAttention(embed_dim, num_heads, dropout=dropout),
+                    "x_dict_in -> x_dict_next",
+                ),
+                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_in"),
+                (
+                    torch.nn.Sequential(
+                        torch.nn.Linear(embed_dim, embed_dim),
+                        torch.nn.ReLU(),
+                        torch.nn.Linear(embed_dim, embed_dim),
+                    ),
+                    "x_dict_in -> x_dict_next",
+                ),
+                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_out"),
+            ],
         ),
-        table_transform_unique=True,
         pre_transform_unique=True,
         table_combination=lambda i, edge, cols: CrossAttentionConv(
-            embed_dim // 2 ** (i + 1), num_heads=num_heads
+            embed_dim, num_heads=num_heads, dropout=dropout, aggr="attn"
         ),
         table_combination_unique=True,
+        post_transform=lambda i, node, cols: Sequential(
+            "x_dict_in, x_dict_next",
+            [
+                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_in"),
+                (
+                    torch.nn.Sequential(
+                        torch.nn.Linear(embed_dim, embed_dim),
+                        torch.nn.ReLU(),
+                        torch.nn.Linear(embed_dim, embed_dim),
+                    ),
+                    "x_dict_in -> x_dict_next",
+                ),
+                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_out"),
+            ],
+        ),
+        post_transform_unique=True,
         decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
         decoder=lambda cols: get_decoder(
-            len(cols) * embed_dim // 2 ** max(gnn_layers, 0),
+            len(cols) * embed_dim,
             output_dim,
             mlp_dims,
             batch_norm,
