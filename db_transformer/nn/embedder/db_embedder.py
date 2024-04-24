@@ -33,7 +33,7 @@ class TableEmbedder(StypeWiseFeatureEncoder):
                 )
         self._active_stypes = set(stype_encoder_dict.keys())
         self._active_cols = [
-            col for _stype in self._active_stypes for col in col_names_dict[_stype]
+            col for _stype in self._active_stypes for col in col_names_dict.get(_stype, [])
         ]
 
     @property
