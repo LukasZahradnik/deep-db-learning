@@ -73,11 +73,9 @@ def create_transformer_model(
                 (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_out"),
             ],
         ),
-        pre_transform_unique=True,
         table_combination=lambda i, edge, cols: CrossAttentionConv(
             embed_dim, num_heads=num_heads, dropout=dropout, aggr="attn"
         ),
-        table_combination_unique=True,
         post_transform=lambda i, node, cols: Sequential(
             "x_dict_in, x_dict_next",
             [
@@ -93,7 +91,6 @@ def create_transformer_model(
                 (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_out"),
             ],
         ),
-        post_transform_unique=True,
         decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
         decoder=lambda cols: get_decoder(
             len(cols) * embed_dim,
