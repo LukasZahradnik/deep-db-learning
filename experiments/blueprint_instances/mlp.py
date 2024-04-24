@@ -42,7 +42,6 @@ def create_mlp_model(
         edge_types=edge_types,
         stype_encoder_dict=get_encoder("basic"),
         positional_encoding=False,
-        per_column_embedding=True,
         num_gnn_layers=0,
         decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
         decoder=lambda cols: get_decoder(

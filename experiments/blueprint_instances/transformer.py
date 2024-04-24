@@ -52,9 +52,8 @@ def create_transformer_model(
         edge_types=edge_types,
         stype_encoder_dict=get_encoder(encoder),
         positional_encoding=False,
-        per_column_embedding=True,
         num_gnn_layers=gnn_layers,
-        pre_transform=lambda i, node, cols: Sequential(
+        pre_combination=lambda i, node, cols: Sequential(
             "x_dict_in",
             [
                 (
@@ -76,7 +75,7 @@ def create_transformer_model(
         table_combination=lambda i, edge, cols: CrossAttentionConv(
             embed_dim, num_heads=num_heads, dropout=dropout, aggr="attn"
         ),
-        post_transform=lambda i, node, cols: Sequential(
+        post_combination=lambda i, node, cols: Sequential(
             "x_dict_in, x_dict_next",
             [
                 (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_in"),

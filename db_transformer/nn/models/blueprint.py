@@ -1,4 +1,3 @@
-import copy
 from typing import Callable, List, Dict, Union, Optional, Any, Tuple
 
 import torch
@@ -31,25 +30,24 @@ class BlueprintModel(torch.nn.Module):
         col_names_dict_per_table: Dict[NodeType, Dict[stype, List[str]]],
         edge_types: Optional[List[EdgeType]] = None,
         stype_encoder_dict: Optional[Dict[torch_frame.stype, StypeEncoder]] = None,
+        post_embedder: Optional[
+            Union[torch.nn.Module, Callable[[NodeType, List[str]], torch.nn.Module]]
+        ] = None,
         positional_encoding: bool = True,
         positional_encoding_dropout: float = 0,
-        per_column_embedding: bool = True,
         num_gnn_layers: int = 1,
-        pre_transform: Optional[
+        pre_combination: Optional[
             Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
         ] = None,
-        pre_transform_unique: bool = True,
         table_combination: Optional[
             Union[
                 torch.nn.Module,
                 Callable[[int, str, Tuple[List[str], List[str]]], torch.nn.Module],
             ]
         ] = None,
-        table_combination_unique: bool = True,
-        post_transform: Optional[
+        post_combination: Optional[
             Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
         ] = None,
-        post_transform_unique: bool = True,
         decoder_aggregation: AggrFunction = torch.nn.Identity(),
         decoder: Optional[
             Union[torch.nn.Module, Callable[[List[str]], torch.nn.Module]]
@@ -62,35 +60,34 @@ class BlueprintModel(torch.nn.Module):
         self.target_col = target[1]
         self.node_types = list(col_names_dict_per_table.keys())
         self.edge_types = edge_types
-        self.embedded_stypes = (
-            list(stype_encoder_dict.keys())
-            if stype_encoder_dict is not None
-            else [stype.categorical, stype.numerical]
+
+        embedder_layers: List[Tuple[torch.nn.Module, str]] = []
+
+        db_embedder = DBEmbedder(
+            embed_dim=embed_dim,
+            col_stats_dict=col_stats_per_table,
+            col_names_dict_per_table=col_names_dict_per_table,
+            stype_encoder_dict=stype_encoder_dict,
         )
-        self.embedded_cols: Dict[NodeType, List[str]] = {}
-        for node, cols_dict in col_names_dict_per_table.items():
-            self.embedded_cols[node] = []
-            for stype, cols in cols_dict.items():
-                if stype not in self.embedded_stypes:
-                    continue
-                self.embedded_cols[node].extend(cols)
-            if len(self.embedded_cols[node]) == 0:
-                self.embedded_cols[node] = ["__filler"]
 
-        embedder_layers: List[Tuple[str, torch.nn.Module]] = []
+        embedder_layers.append((db_embedder, "tf_dict -> x_dict"))
 
-        embedder_layers.append(
-            (
-                DBEmbedder(
-                    embed_dim=embed_dim,
-                    col_stats_per_table=col_stats_per_table,
-                    col_names_dict_per_table=col_names_dict_per_table,
-                    stype_encoder_dict=stype_encoder_dict,
-                    return_cols=False,
-                ),
-                "tf_dict -> x_dict",
+        def create_post_embedder_transform(node):
+            if isinstance(post_embedder, torch.nn.Module):
+                return post_embedder
+            else:
+                return post_embedder(node, db_embedder.active_cols_dict[node])
+
+        if post_embedder is not None:
+            embedder_layers.append(
+                (
+                    NodeApplied(
+                        create_post_embedder_transform,
+                        self.node_types,
+                    ),
+                    "x_dict -> x_dict",
+                )
             )
-        )
 
         if positional_encoding:
             embedder_layers.append(
@@ -104,59 +101,45 @@ class BlueprintModel(torch.nn.Module):
                     "x_dict -> x_dict",
                 )
             )
-        if not per_column_embedding:
-            embedder_layers.append(
-                (
-                    NodeApplied(
-                        lambda _: lambda x: x.view(*x.shape[:-2], -1),
-                        self.node_types,
-                    ),
-                    "x_dict -> x_dict",
-                )
-            )
 
         self.embedder = Sequential("tf_dict", embedder_layers)
 
         layers: List[Tuple[str, torch.nn.Module]] = []
 
-        def create_pre_transform(node):
-            if isinstance(pre_transform, torch.nn.Module):
-                return (
-                    copy.deepcopy(pre_transform) if pre_transform_unique else pre_transform
-                )
+        if table_combination is None:
+            table_combination = CrossAttentionConv(embed_dim, 4)
+
+        def create_pre_combination_transform(node):
+            if isinstance(pre_combination, torch.nn.Module):
+                return pre_combination
             else:
-                return pre_transform(i, node, self.embedded_cols[node])
+                return pre_combination(i, node, db_embedder.active_cols_dict[node])
 
         def create_table_combination(edge_type):
-            if is_combination_module:
-                return (
-                    copy.deepcopy(table_combination)
-                    if table_combination_unique
-                    else table_combination
-                )
+            if isinstance(table_combination, torch.nn.Module):
+                return table_combination
             else:
                 return table_combination(
                     i,
                     edge_type,
-                    (self.embedded_cols[edge_type[0]], self.embedded_cols[edge_type[2]]),
+                    (
+                        db_embedder.active_cols_dict[edge_type[0]],
+                        db_embedder.active_cols_dict[edge_type[2]],
+                    ),
                 )
 
-        def create_post_transform(node):
-            if isinstance(post_transform, torch.nn.Module):
-                return (
-                    copy.deepcopy(post_transform)
-                    if post_transform_unique
-                    else post_transform
-                )
+        def create_post_combination_transform(node):
+            if isinstance(post_combination, torch.nn.Module):
+                return post_combination
             else:
-                return post_transform(i, node, self.embedded_cols[node])
+                return post_combination(i, node, db_embedder.active_cols_dict[node])
 
         for i in range(num_gnn_layers):
-            if pre_transform is not None:
+            if pre_combination is not None:
                 layers.append(
                     (
                         NodeApplied(
-                            create_pre_transform,
+                            create_pre_combination_transform,
                             self.node_types,
                         ),
                         f"x_dict_{i} -> x_dict_{i}",
@@ -167,9 +150,6 @@ class BlueprintModel(torch.nn.Module):
                 layers.append((torch.nn.Identity(), f"x_dict_{i} -> x_dict_{i+1}"))
                 continue
 
-            if table_combination is None:
-                table_combination = CrossAttentionConv(embed_dim, 4)
-            is_combination_module = isinstance(table_combination, torch.nn.Module)
             convs = {
                 edge_type: create_table_combination(edge_type)
                 for edge_type in self.edge_types
@@ -177,11 +157,13 @@ class BlueprintModel(torch.nn.Module):
 
             layers.append((HeteroConv(convs), f"x_dict_{i}, edge_dict -> x_dict_{i+1}"))
 
-            if post_transform is not None:
+            if post_combination is not None:
                 layers.append(
                     (
                         NodeApplied(
-                            create_post_transform, self.node_types, dynamic_args=True
+                            create_post_combination_transform,
+                            self.node_types,
+                            dynamic_args=True,
                         ),
                         f"x_dict_{i}, x_dict_{i+1} -> x_dict_{i+1}",
                     )
@@ -199,7 +181,7 @@ class BlueprintModel(torch.nn.Module):
             self.decoder.append(
                 decoder
                 if isinstance(decoder, torch.nn.Module)
-                else decoder(self.embedded_cols[self.target_table])
+                else decoder(db_embedder.active_cols_dict[self.target_table])
             )
 
         if output_activation is not None:
