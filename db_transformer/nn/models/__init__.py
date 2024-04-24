@@ -1,3 +1,5 @@
+from .tabular import *
+
 from .attn_gnn import AttnDBGNN
 from .blueprint import BlueprintModel
 from .db_gnn import DBGNN

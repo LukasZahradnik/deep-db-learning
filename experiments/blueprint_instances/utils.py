@@ -9,8 +9,11 @@ from db_transformer.nn import EmbeddingTranscoder
 
 
 def get_encoder(
-    type: Optional[Literal["basic", "with_time", "with_embeddings", "all"]] = None
+    type: Optional[
+        Literal["basic", "with_time", "with_embeddings", "all", "excelformer"]
+    ] = None
 ) -> Dict[stype, encoder.StypeEncoder]:
+
     if type == "basic" or type is None:
         return {
             stype.categorical: encoder.EmbeddingEncoder(
@@ -20,19 +23,22 @@ def get_encoder(
                 na_strategy=NAStrategy.MEAN,
             ),
         }
-
+    if type == "excelformer" or type is None:
+        return {
+            stype.numerical: encoder.ExcelFormerEncoder(
+                na_strategy=NAStrategy.MEAN,
+            ),
+        }
     if type == "with_time" or type is None:
         return {
             **get_encoder("basic"),
             stype.timestamp: encoder.TimestampEncoder(),
         }
-
     if type == "with_embeddings" or type is None:
         return {
             **get_encoder("basic"),
             stype.embedding: EmbeddingTranscoder(),
         }
-
     if type == "all" or type is None:
         return {
             **get_encoder("with_embeddings"),
