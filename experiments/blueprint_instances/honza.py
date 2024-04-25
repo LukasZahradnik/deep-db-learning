@@ -43,7 +43,7 @@ def create_honza_model(
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
         stype_encoder_dict=get_encoder("basic"),
-        post_embedder=lambda x: x.view(*x.shape[:-2], -1),
+        post_embedder=lambda node, cols: lambda x: x.view(*x.shape[:-2], -1),
         positional_encoding=False,
         num_gnn_layers=gnn_layers,
         pre_combination=lambda i, node, cols: (
@@ -68,7 +68,6 @@ def create_honza_model(
             len(cols[1]) * (embed_dim // 2 ** (i + 1)),
             aggr="sum",
         ),
-        table_combination_unique=True,
         decoder_aggregation=torch.nn.Identity(),
         decoder=lambda cols: get_decoder(
             len(cols) * embed_dim // 2**gnn_layers, output_dim, mlp_dims, batch_norm
