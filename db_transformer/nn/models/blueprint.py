@@ -42,7 +42,7 @@ class BlueprintModel(torch.nn.Module):
         table_combination: Optional[
             Union[
                 torch.nn.Module,
-                Callable[[int, str, Tuple[List[str], List[str]]], torch.nn.Module],
+                Callable[[int, EdgeType, Tuple[List[str], List[str]]], torch.nn.Module],
             ]
         ] = None,
         post_combination: Optional[
