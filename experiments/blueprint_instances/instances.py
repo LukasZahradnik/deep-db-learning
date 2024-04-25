@@ -11,12 +11,13 @@ from torch_frame.data import StatType
 from .excelformer import create_excelformer_model
 from .honza import create_honza_model
 from .mlp import create_mlp_model
+from .tabnet import create_tabnet_model
 from .transformer import create_transformer_model
 from .trompt import create_trompt_model
 
 
 def create_blueprint_model(
-    instance: Literal["excelformer", "honza", "mlp", "transformer", "trompt"],
+    instance: Literal["excelformer", "honza", "mlp", "tabnet", "transformer", "trompt"],
     defaults: CTUDatasetDefault,
     col_names_dict: Dict[NodeType, List[str]],
     edge_types: List[EdgeType],
@@ -33,6 +34,10 @@ def create_blueprint_model(
         )
     if instance == "mlp":
         return create_mlp_model(
+            defaults, col_names_dict, edge_types, col_stats_dict, config
+        )
+    if instance == "tabnet":
+        return create_tabnet_model(
             defaults, col_names_dict, edge_types, col_stats_dict, config
         )
     if instance == "transformer":
