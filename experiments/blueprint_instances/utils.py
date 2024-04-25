@@ -10,7 +10,9 @@ from db_transformer.nn import EmbeddingTranscoder
 
 def get_encoder(
     type: Optional[
-        Literal["basic", "with_time", "with_embeddings", "all", "excelformer", "tabnet"]
+        Literal[
+            "basic", "with_time", "with_embeddings", "all", "excelformer", "saint", "tabnet"
+        ]
     ] = None
 ) -> Dict[stype, encoder.StypeEncoder]:
 
@@ -27,6 +29,15 @@ def get_encoder(
         return {
             stype.numerical: encoder.ExcelFormerEncoder(
                 na_strategy=NAStrategy.MEAN,
+            ),
+        }
+    if type == "saint" or type is None:
+        return {
+            stype.categorical: encoder.EmbeddingEncoder(
+                na_strategy=NAStrategy.MOST_FREQUENT,
+            ),
+            stype.numerical: encoder.LinearEncoder(
+                na_strategy=NAStrategy.MEAN, post_module=torch.nn.ReLU()
             ),
         }
     if type == "tabnet" or type is None:
