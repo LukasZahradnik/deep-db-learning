@@ -5,6 +5,7 @@ import torch
 from torch_geometric.nn import Sequential
 from torch_geometric.typing import NodeType, EdgeType
 
+from torch_frame import stype
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
@@ -21,7 +22,7 @@ from .utils import get_decoder, get_encoder
 
 def create_saint_model(
     defaults: CTUDatasetDefault,
-    col_names_dict: Dict[NodeType, List[str]],
+    col_names_dict: Dict[NodeType, Dict[stype, List[str]]],
     edge_types: List[EdgeType],
     col_stats_dict: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
     config: Dict[str, Any],

@@ -20,7 +20,7 @@ from .utils import get_decoder, get_encoder
 
 def create_transformer_model(
     defaults: CTUDatasetDefault,
-    col_names_dict: Dict[NodeType, List[str]],
+    col_names_dict: Dict[NodeType, Dict[stype, List[str]]],
     edge_types: List[EdgeType],
     col_stats_dict: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
     config: Dict[str, Any],
