@@ -3,31 +3,11 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from click import Option
 import torch
 import torch.nn.functional as F
-from torch import Tensor
 
 
 class TabNetEncoder(torch.nn.Module):
-    r"""The TabNet encoder model introduced in the
-    `"TabNet: Attentive Interpretable Tabular Learning"
-    <https://arxiv.org/abs/1908.07442>`_ paper.
-
-    Args:
-        channels (int): Input embeddings dimensionality.
-        out_channels (int): Output dimensionality
-        num_cols (int): Number of input columns.
-        num_layers (int): Number of TabNet layers.
-        gamma (float): The gamma value for updating the prior for the attention
-            mask.
-        num_shared_glu_layers (int): Number of GLU layers shared across the
-            :obj:`num_layers` :class:`FeatureTransformer`s. (default: :obj:`2`)
-        num_dependent_glu_layers (int, optional): Number of GLU layers to use
-            in each of :obj:`num_layers` :class:`FeatureTransformer`s.
-            (default: :obj:`2`)
-    """
-
     def __init__(
         self,
         channels: int,
@@ -88,7 +68,9 @@ class TabNetEncoder(torch.nn.Module):
             attn_transformer.reset_parameters()
         self.lin.reset_parameters()
 
-    def forward(self, x: Tensor, prior: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self, x: torch.Tensor, prior: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         # [batch_size, num_cols, channels]
         x = self.bn(x)
 
@@ -127,22 +109,6 @@ class TabNetEncoder(torch.nn.Module):
 
 
 class TabNetDecoder(torch.nn.Module):
-    r"""The TabNet decoder model introduced in the
-    `"TabNet: Attentive Interpretable Tabular Learning"
-    <https://arxiv.org/abs/1908.07442>`_ paper.
-
-    Args:
-        channels (int): Input embeddings dimensionality.
-        out_channels (int): Output dimensionality
-        num_cols (int): Number of input columns.
-        num_layers (int): Number of TabNet layers.
-        num_shared_glu_layers (int): Number of GLU layers shared across the
-            :obj:`num_layers` :class:`FeatureTransformer`s. (default: :obj:`2`)
-        num_dependent_glu_layers (int, optional): Number of GLU layers to use
-            in each of :obj:`num_layers` :class:`FeatureTransformer`s.
-            (default: :obj:`2`)
-    """
-
     def __init__(
         self,
         channels: int,
@@ -176,7 +142,7 @@ class TabNetDecoder(torch.nn.Module):
             feat_transformer.reset_parameters()
         self.lin.reset_parameters()
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         outs = []
         for i in range(self.num_layers):
             # [batch_size, split_feat_channels + split_attn_channel]
@@ -221,7 +187,7 @@ class FeatureTransformer(torch.nn.Module):
             )
         self.reset_parameters()
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.shared_glu_block(x)
         x = self.dependent(x)
         return x
@@ -253,7 +219,7 @@ class GLUBlock(torch.nn.Module):
             self.glu_layers.append(glu_layer)
         self.reset_parameters()
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         for i, glu_layer in enumerate(self.glu_layers):
             if self.no_first_residual and i == 0:
                 x = glu_layer(x)
@@ -277,7 +243,7 @@ class GLULayer(torch.nn.Module):
         self.glu = torch.nn.GLU()
         self.reset_parameters()
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.lin(x)
         return self.glu(x)
 
@@ -293,7 +259,7 @@ class AttentiveTransformer(torch.nn.Module):
         self.bn = GhostBatchNorm1d(num_cols)
         self.reset_parameters()
 
-    def forward(self, x: Tensor, prior: Tensor) -> Tensor:
+    def forward(self, x: torch.Tensor, prior: torch.Tensor) -> torch.Tensor:
         x = self.lin(x)
         x = self.bn(x)
         x = prior * x
@@ -320,7 +286,7 @@ class GhostBatchNorm1d(torch.nn.Module):
         self.virtual_batch_size = virtual_batch_size
         self.bn = torch.nn.BatchNorm1d(self.input_dim)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if len(x) > 0:
             num_chunks = math.ceil(len(x) / self.virtual_batch_size)
             chunks = torch.chunk(x, num_chunks, dim=0)

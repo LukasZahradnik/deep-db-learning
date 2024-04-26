@@ -1,25 +1,10 @@
 import torch
-from torch import Tensor
-from torch.nn import Module, ModuleList, Parameter
 
 from torch_frame.nn.conv import TromptConv
 from torch_frame.nn.decoder import TromptDecoder
 
 
-class Trompt(Module):
-    r"""The Trompt model introduced in the
-    `"Trompt: Towards a Better Deep Neural Network for Tabular Data"
-    <https://arxiv.org/abs/2305.18446>`_ paper.
-
-    Args:
-        channels (int): Hidden channel dimensionality
-        out_channels (int): Output channels dimensionality
-        num_cols (int): Number of input columns.
-        num_prompts (int): Number of prompt columns.
-        num_layers (int, optional): Number of :class:`TromptConv` layers.
-            (default: :obj:`6`)
-    """
-
+class Trompt(torch.nn.Module):
     def __init__(
         self,
         channels: int,
@@ -36,9 +21,9 @@ class Trompt(Module):
         self.out_channels = out_channels
         self.num_layers = num_layers
 
-        self.x_prompt = Parameter(torch.empty(num_prompts, channels))
+        self.x_prompt = torch.nn.Parameter(torch.empty(num_prompts, channels))
 
-        self.trompt_convs = ModuleList(
+        self.trompt_convs = torch.nn.ModuleList(
             [TromptConv(channels, num_cols, num_prompts) for i in range(num_layers)]
         )
 
@@ -52,19 +37,7 @@ class Trompt(Module):
             trompt_conv.reset_parameters()
         self.trompt_decoder.reset_parameters()
 
-    def forward(self, x: Tensor) -> Tensor:
-        r"""Transforming :class:`TensorFrame` object into a series of output
-        predictions at each layer. Used during training to compute layer-wise
-        loss.
-
-        Args:
-            x (torch.Tensor): Feature-based embedding of shape
-                :obj:`[batch_size, num_cols, channels]`
-
-        Returns:
-            torch.Tensor: Output predictions. The
-                shape is :obj:`[batch_size, out_channels]`.
-        """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size = len(x)
         outs = []
         # [batch_size, num_prompts, channels]
