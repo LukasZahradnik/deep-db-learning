@@ -5,6 +5,7 @@ import torch
 from torch_geometric.nn import Sequential
 from torch_geometric.typing import NodeType, EdgeType
 
+from torch_frame import stype
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
