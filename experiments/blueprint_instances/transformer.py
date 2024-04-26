@@ -54,40 +54,40 @@ def create_transformer_model(
         positional_encoding=False,
         num_gnn_layers=gnn_layers,
         pre_combination=lambda i, node, cols: Sequential(
-            "x_dict_in",
+            "x_in",
             [
                 (
                     SelfAttention(embed_dim, num_heads, dropout=dropout),
-                    "x_dict_in -> x_dict_next",
+                    "x_in -> x_next",
                 ),
-                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_in"),
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_in"),
                 (
                     torch.nn.Sequential(
                         torch.nn.Linear(embed_dim, embed_dim),
                         torch.nn.ReLU(),
                         torch.nn.Linear(embed_dim, embed_dim),
                     ),
-                    "x_dict_in -> x_dict_next",
+                    "x_in -> x_next",
                 ),
-                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_out"),
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_out"),
             ],
         ),
         table_combination=lambda i, edge, cols: CrossAttentionConv(
             embed_dim, num_heads=num_heads, dropout=dropout, aggr="attn"
         ),
         post_combination=lambda i, node, cols: Sequential(
-            "x_dict_in, x_dict_next",
+            "x_in, x_next",
             [
-                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_in"),
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_in"),
                 (
                     torch.nn.Sequential(
                         torch.nn.Linear(embed_dim, embed_dim),
                         torch.nn.ReLU(),
                         torch.nn.Linear(embed_dim, embed_dim),
                     ),
-                    "x_dict_in -> x_dict_next",
+                    "x_in -> x_next",
                 ),
-                (ResidualNorm(embed_dim), "x_dict_in, x_dict_next -> x_dict_out"),
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_out"),
             ],
         ),
         decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
