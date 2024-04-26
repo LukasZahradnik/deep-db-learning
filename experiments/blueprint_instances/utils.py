@@ -11,7 +11,14 @@ from db_transformer.nn import EmbeddingTranscoder
 def get_encoder(
     type: Optional[
         Literal[
-            "basic", "with_time", "with_embeddings", "all", "excelformer", "saint", "tabnet"
+            "basic",
+            "with_time",
+            "with_embeddings",
+            "all",
+            "excelformer",
+            "saint",
+            "tabnet",
+            "tabtransformer",
         ]
     ] = None
 ) -> Dict[stype, encoder.StypeEncoder]:
@@ -41,6 +48,15 @@ def get_encoder(
             ),
         }
     if type == "tabnet" or type is None:
+        return {
+            stype.categorical: encoder.EmbeddingEncoder(
+                na_strategy=NAStrategy.MOST_FREQUENT,
+            ),
+            stype.numerical: encoder.StackEncoder(
+                na_strategy=NAStrategy.MEAN,
+            ),
+        }
+    if type == "tabtransformer" or type is None:
         return {
             stype.categorical: encoder.EmbeddingEncoder(
                 na_strategy=NAStrategy.MOST_FREQUENT,
