@@ -12,7 +12,7 @@ from torch_frame.nn import StypeEncoder
 from torch_frame.data import StatType
 
 from db_transformer.nn import (
-    CrossAttentionConv,
+    MeanSumConv,
     DBEmbedder,
     NodeApplied,
     PositionalEncoding,
@@ -107,7 +107,7 @@ class BlueprintModel(torch.nn.Module):
         layers: List[Tuple[str, torch.nn.Module]] = []
 
         if table_combination is None:
-            table_combination = CrossAttentionConv(embed_dim, 4)
+            table_combination = MeanSumConv()
 
         def create_pre_combination_transform(node):
             if isinstance(pre_combination, torch.nn.Module):
