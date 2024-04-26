@@ -24,7 +24,6 @@ def create_excelformer_model(
     target = defaults.target
 
     embed_dim = config.get("embed_dim", 64)
-    encoder = config.get("encoder", "excelformer")
     gnn_layers = config.get("gnn_layers", 1)
     num_layers = config.get("num_layers", 6)
     num_heads = config.get("num_heads", 1)
@@ -44,10 +43,10 @@ def create_excelformer_model(
         col_stats_per_table=col_stats_dict,
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
-        stype_encoder_dict=get_encoder(encoder),
+        stype_encoder_dict=get_encoder("excelformer"),
         positional_encoding=False,
         num_gnn_layers=gnn_layers,
-        post_embedder=lambda node, cols: torch.nn.Sequential(
+        pre_combination=lambda i, node, cols: torch.nn.Sequential(
             *[
                 ExcelFormerConv(
                     embed_dim,
@@ -63,7 +62,6 @@ def create_excelformer_model(
         table_combination=lambda i, edge, cols: CrossAttentionConv(
             embed_dim, num_heads=num_heads
         ),
-        # decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
         decoder=lambda cols: ExcelFormerDecoder(embed_dim, output_dim, len(cols)),
         output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
