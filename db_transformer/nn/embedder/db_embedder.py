@@ -21,7 +21,7 @@ class TableEmbedder(StypeWiseFeatureEncoder):
         self,
         embed_dim: int,
         col_stats: dict[str, dict[StatType, Any]],
-        col_names_dict: dict[stype, list[str]],
+        col_names_dict: dict[stype, List[str]],
         stype_encoder_dict: dict[stype, StypeEncoder],
     ) -> None:
         self.embed_dim = embed_dim
@@ -31,13 +31,17 @@ class TableEmbedder(StypeWiseFeatureEncoder):
                 warnings.warn(
                     f"Encoder for stype.{stype} is not present. Columns of this stype will be ignored."
                 )
-        self._active_stypes = set(stype_encoder_dict.keys())
+        self._active_stypes = {
+            _stype: col_names_dict.get(_stype, [])
+            for _stype in stype_encoder_dict
+            if _stype in col_names_dict
+        }
         self._active_cols = [
             col for _stype in self._active_stypes for col in col_names_dict.get(_stype, [])
         ]
 
     @property
-    def active_stypes(self) -> Set[stype]:
+    def active_stypes(self) -> Dict[stype, List[str]]:
         return self._active_stypes
 
     @property
@@ -85,6 +89,7 @@ class DBEmbedder(torch.nn.Module):
         super().__init__()
 
         self.active_cols_dict: Dict[NodeType, List[str]] = {}
+        self.active_stypes_dict: Dict[stype, List[str]] = {}
 
         self.embedders = torch.nn.ModuleDict()
         for table_name in col_names_dict_per_table:
@@ -110,6 +115,7 @@ class DBEmbedder(torch.nn.Module):
             self.active_cols_dict[table_name] = embedder.active_cols
             if len(embedder.active_cols) == 0:
                 self.active_cols_dict[table_name] = ["__filler"]
+            self.active_stypes_dict[table_name] = embedder.active_stypes
 
     def forward(self, tf_dict: Dict[NodeType, TensorFrame]) -> Dict[NodeType, torch.Tensor]:
         x_dict = {}
