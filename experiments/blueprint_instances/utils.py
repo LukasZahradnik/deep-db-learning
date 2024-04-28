@@ -5,8 +5,6 @@ import torch
 from torch_frame import stype, NAStrategy
 from torch_frame.nn import encoder
 
-from db_transformer.nn import EmbeddingTranscoder
-
 
 def get_encoder(
     type: Optional[
@@ -73,7 +71,7 @@ def get_encoder(
     if type == "with_embeddings" or type is None:
         return {
             **get_encoder("basic"),
-            stype.embedding: EmbeddingTranscoder(),
+            stype.embedding: encoder.LinearEmbeddingEncoder(),
         }
     if type == "all" or type is None:
         return {
