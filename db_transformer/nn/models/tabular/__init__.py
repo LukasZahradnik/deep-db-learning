@@ -1,2 +1,2 @@
 from .tabnet import TabNetEncoder, TabNetDecoder
-from .trompt import Trompt
+from .trompt import TromptEncoder, TromptDecoder
