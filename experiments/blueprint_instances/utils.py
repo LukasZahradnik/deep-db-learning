@@ -30,13 +30,13 @@ def get_encoder(
                 na_strategy=NAStrategy.MEAN,
             ),
         }
-    if type == "excelformer" or type is None:
+    if type == "excelformer":
         return {
             stype.numerical: encoder.ExcelFormerEncoder(
                 na_strategy=NAStrategy.MEAN,
             ),
         }
-    if type == "saint" or type is None:
+    if type == "saint":
         return {
             stype.categorical: encoder.EmbeddingEncoder(
                 na_strategy=NAStrategy.MOST_FREQUENT,
@@ -45,7 +45,7 @@ def get_encoder(
                 na_strategy=NAStrategy.MEAN, post_module=torch.nn.ReLU()
             ),
         }
-    if type == "tabnet" or type is None:
+    if type == "tabnet":
         return {
             stype.categorical: encoder.EmbeddingEncoder(
                 na_strategy=NAStrategy.MOST_FREQUENT,
@@ -54,7 +54,7 @@ def get_encoder(
                 na_strategy=NAStrategy.MEAN,
             ),
         }
-    if type == "tabtransformer" or type is None:
+    if type == "tabtransformer":
         return {
             stype.categorical: encoder.EmbeddingEncoder(
                 na_strategy=NAStrategy.MOST_FREQUENT,
@@ -63,17 +63,17 @@ def get_encoder(
                 na_strategy=NAStrategy.MEAN,
             ),
         }
-    if type == "with_time" or type is None:
+    if type == "with_time":
         return {
             **get_encoder("basic"),
             stype.timestamp: encoder.TimestampEncoder(),
         }
-    if type == "with_embeddings" or type is None:
+    if type == "with_embeddings":
         return {
             **get_encoder("basic"),
             stype.embedding: encoder.LinearEmbeddingEncoder(),
         }
-    if type == "all" or type is None:
+    if type == "all":
         return {
             **get_encoder("with_embeddings"),
             stype.timestamp: encoder.TimestampEncoder(),
