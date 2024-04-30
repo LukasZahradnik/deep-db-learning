@@ -1,2 +1,2 @@
 from .cross_attention import CrossAttentionConv
-from .mean_sum import MeanSumConv
+from .mean_add import MeanAddConv

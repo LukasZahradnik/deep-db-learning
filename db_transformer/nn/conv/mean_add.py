@@ -5,7 +5,7 @@ import torch
 from torch_geometric.nn import MessagePassing, Aggregation
 
 
-class MeanSumConv(MessagePassing):
+class MeanAddConv(MessagePassing):
     def __init__(
         self,
         aggr: Optional[Union[str, List[str], Aggregation]] = "sum",
