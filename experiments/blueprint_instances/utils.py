@@ -81,7 +81,14 @@ def get_encoder(
     raise ValueError(f"Unknown encoder type '{type}'")
 
 
-def get_decoder(out_gnn: int, output_dim: int, mlp_dims: List[int] = [], batch_norm=False):
+def get_decoder(
+    out_gnn: int,
+    output_dim: int,
+    mlp_dims: List[int] = [],
+    batch_norm: bool = False,
+    layer_activation: type[torch.nn.Module] = torch.nn.ReLU,
+    out_activation: Optional[torch.nn.Module] = None,
+):
 
     mlp_dims = [out_gnn, *mlp_dims, output_dim]
 
@@ -90,7 +97,10 @@ def get_decoder(out_gnn: int, output_dim: int, mlp_dims: List[int] = [], batch_n
         if i > 0:
             if batch_norm:
                 mlp_layers.append(torch.nn.BatchNorm1d(mlp_dims[i]))
-            mlp_layers.append(torch.nn.ReLU())
+            mlp_layers.append(layer_activation())
         mlp_layers.append(torch.nn.Linear(mlp_dims[i], mlp_dims[i + 1]))
+
+    if out_activation is not None:
+        mlp_layers.append(out_activation)
 
     return torch.nn.Sequential(*mlp_layers)

@@ -50,6 +50,6 @@ def create_mlp_model(
             output_dim,
             mlp_dims,
             batch_norm,
+            out_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         ),
-        output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
     )

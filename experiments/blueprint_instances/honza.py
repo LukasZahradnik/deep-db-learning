@@ -71,8 +71,11 @@ def create_honza_model(
         ),
         decoder_aggregation=torch.nn.Identity(),
         decoder=lambda cols: get_decoder(
-            len(cols) * embed_dim // 2**gnn_layers, output_dim, mlp_dims, batch_norm
+            len(cols) * embed_dim // 2**gnn_layers,
+            output_dim,
+            mlp_dims,
+            batch_norm,
+            out_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         ),
-        output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
     )
