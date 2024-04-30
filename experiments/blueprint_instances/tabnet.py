@@ -8,8 +8,11 @@ from torch_frame import stype
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
-from db_transformer.nn import BlueprintModel, TabNetEncoder, TabNetDecoder
-from db_transformer.nn.conv.cross_attention import CrossAttentionConv
+from db_transformer.nn import (
+    BlueprintModel,
+    TabNetEncoder,
+    MeanAddConv,
+)
 
 from .utils import get_decoder, get_encoder
 
@@ -24,8 +27,12 @@ def create_tabnet_model(
 
     target = defaults.target
 
+    init_embed_dim = 16
+
     embed_dim = config.get("embed_dim", 64)
     gnn_layers = config.get("gnn_layers", 1)
+    mlp_dims = config.get("mlp_dims", [])
+
     num_layers = config.get("num_layers", 1)
     num_heads = config.get("num_heads", 1)
     residual = config.get("residual", False)
@@ -41,7 +48,7 @@ def create_tabnet_model(
 
     return BlueprintModel(
         target=target,
-        embed_dim=embed_dim,
+        embed_dim=init_embed_dim,
         col_stats_per_table=col_stats_dict,
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
@@ -49,20 +56,20 @@ def create_tabnet_model(
         positional_encoding=False,
         num_gnn_layers=gnn_layers,
         pre_combination=lambda i, node, cols: TabNetEncoder(
-            channels=embed_dim,
-            out_channels=embed_dim,
+            channels=init_embed_dim,
+            out_channels=len(cols) * init_embed_dim,
             num_cols=len(cols),
             num_layers=num_layers,
+            split_feat_channels=embed_dim,
+            split_attn_channels=embed_dim,
         ),
-        table_combination=lambda i, edge, cols: CrossAttentionConv(
-            embed_dim=embed_dim, num_heads=num_heads, dropout=dropout
+        table_combination=lambda i, edge, cols: MeanAddConv(per_column_embedding=False),
+        decoder=lambda cols: get_decoder(
+            init_embed_dim * len(cols),
+            output_dim,
+            mlp_dims,
+            False,
+            out_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         ),
-        # residual connection
-        post_combination=(
-            None if not residual else lambda i, node, cols: lambda x, x_next: x + x_next
-        ),
-        decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
-        decoder=lambda cols: get_decoder(embed_dim * len(cols), output_dim, [], False),
-        output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
     )

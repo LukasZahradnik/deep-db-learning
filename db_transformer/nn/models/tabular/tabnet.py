@@ -1,10 +1,15 @@
-from __future__ import annotations
-
 import math
 from typing import Optional
 
 import torch
 import torch.nn.functional as F
+
+import math
+
+import torch
+import torch.nn.functional as F
+
+import torch_frame
 
 
 class TabNetEncoder(torch.nn.Module):
@@ -14,46 +19,43 @@ class TabNetEncoder(torch.nn.Module):
         out_channels: int,
         num_cols: int,
         num_layers: int,
+        split_feat_channels: int,
+        split_attn_channels: int,
         gamma: float = 1.2,
         num_shared_glu_layers: int = 2,
         num_dependent_glu_layers: int = 2,
-        split_feat_channels: Optional[int] = None,
-        split_attn_channels: Optional[int] = None,
     ) -> None:
         super().__init__()
         if num_layers <= 0:
             raise ValueError(f"num_layers must be a positive integer (got {num_layers})")
-        self.channels = channels
-        self.split_feat_channels = (
-            split_feat_channels if split_feat_channels is not None else channels
-        )
-        self.split_attn_channels = (
-            split_attn_channels if split_attn_channels is not None else channels
-        )
+
+        self.split_feat_channels = split_feat_channels
+        self.split_attn_channels = split_attn_channels
         self.num_layers = num_layers
         self.gamma = gamma
 
-        # Batch norm applied to input feature.
-        self.bn = torch.nn.BatchNorm1d(num_cols)
+        in_channels = channels * num_cols
 
-        self.attn_transformers = torch.nn.ModuleList()
-        for _ in range(self.num_layers):
-            self.attn_transformers.append(
-                AttentiveTransformer(
-                    in_channels=self.split_attn_channels,
-                    out_channels=channels,
-                    num_cols=num_cols,
-                )
-            )
+        # Batch norm applied to input feature.
+        self.bn = torch.nn.BatchNorm1d(in_channels)
 
         self.feat_transformers = torch.nn.ModuleList()
         for _ in range(self.num_layers + 1):
             self.feat_transformers.append(
                 FeatureTransformer(
-                    in_channels=channels,
-                    out_channels=self.split_feat_channels + self.split_attn_channels,
+                    in_channels,
+                    split_feat_channels + split_attn_channels,
                     num_shared_glu_layers=num_shared_glu_layers,
                     num_dependent_glu_layers=num_dependent_glu_layers,
+                )
+            )
+
+        self.attn_transformers = torch.nn.ModuleList()
+        for _ in range(self.num_layers):
+            self.attn_transformers.append(
+                AttentiveTransformer(
+                    in_channels=split_attn_channels,
+                    out_channels=in_channels,
                 )
             )
 
@@ -68,50 +70,51 @@ class TabNetEncoder(torch.nn.Module):
             attn_transformer.reset_parameters()
         self.lin.reset_parameters()
 
-    def forward(
-        self, x: torch.Tensor, prior: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        # [batch_size, num_cols, channels]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        # [batch_size, num_cols, cat_emb_channels]
+        batch_size = x.shape[0]
+        # [batch_size, num_cols * cat_emb_channels]
+        x = x.view(batch_size, math.prod(x.shape[1:]))
         x = self.bn(x)
 
-        if prior is None:
-            # [batch_size, num_cols, channels]
-            prior = torch.ones_like(x)
+        # [batch_size, num_cols * cat_emb_channels]
+        prior = torch.ones_like(x)
 
-        # [batch_size, num_cols, split_attn_channels]
+        # [batch_size, split_attn_channels]
         attention_x = self.feat_transformers[0](x)
-        attention_x = attention_x[:, :, self.split_feat_channels :]
+        attention_x = attention_x[:, self.split_feat_channels :]
 
         outs = []
         for i in range(self.num_layers):
-            # [batch_size, num_cols, channels]
+            # [batch_size, num_cols * cat_emb_channels]
             attention_mask = self.attn_transformers[i](attention_x, prior)
-            # [batch_size, num_cols, channels]
+
+            # [batch_size, num_cols * cat_emb_channels]
             masked_x = attention_mask * x
-            # [batch_size, num_cols, split_feat_channels + split_attn_channel]
+            # [batch_size, split_feat_channels + split_attn_channel]
             out = self.feat_transformers[i + 1](masked_x)
 
             # Get the split feature
-            # [batch_size, num_cols, split_feat_channels]
-            feature_x = F.relu(out[:, :, : self.split_feat_channels])
+            # [batch_size, split_feat_channels]
+            feature_x = F.relu(out[:, : self.split_feat_channels])
             outs.append(feature_x)
             # Get the split attention
-            # [batch_size, num_cols, split_attn_channels]
-            attention_x = out[:, :, self.split_feat_channels :]
+            # [batch_size, split_attn_channels]
+            attention_x = out[:, self.split_feat_channels :]
 
             # Update prior
             prior = (self.gamma - attention_mask) * prior
 
         out = sum(outs)
         out = self.lin(out)
-
         return out
 
 
 class TabNetDecoder(torch.nn.Module):
     def __init__(
         self,
-        channels: int,
+        in_channels: int,
         out_channels: int,
         num_layers: int,
         num_shared_glu_layers: int = 2,
@@ -120,15 +123,14 @@ class TabNetDecoder(torch.nn.Module):
         super().__init__()
         if num_layers <= 0:
             raise ValueError(f"num_layers must be a positive integer (got {num_layers})")
-        self.channels = channels
         self.num_layers = num_layers
 
         self.feat_transformers = torch.nn.ModuleList()
-        for _ in range(self.num_layers):
+        for _ in range(self.num_layers + 1):
             self.feat_transformers.append(
                 FeatureTransformer(
-                    in_channels=channels,
-                    out_channels=out_channels,
+                    in_channels,
+                    out_channels,
                     num_shared_glu_layers=num_shared_glu_layers,
                     num_dependent_glu_layers=num_dependent_glu_layers,
                 )
@@ -169,7 +171,6 @@ class FeatureTransformer(torch.nn.Module):
                 in_channels=in_channels,
                 out_channels=out_channels,
                 no_first_residual=True,
-                num_glu_layers=num_shared_glu_layers,
             )
             if num_shared_glu_layers > 0
             else torch.nn.Identity()
@@ -179,10 +180,15 @@ class FeatureTransformer(torch.nn.Module):
         if num_dependent_glu_layers == 0:
             self.dependent = torch.nn.Identity()
         else:
+            if not isinstance(self.shared_glu_block, torch.nn.Identity):
+                in_channels = out_channels
+                no_first_residual = False
+            else:
+                no_first_residual = True
             self.dependent = GLUBlock(
-                in_channels=out_channels,
+                in_channels=in_channels,
                 out_channels=out_channels,
-                no_first_residual=False,
+                no_first_residual=no_first_residual,
                 num_glu_layers=num_dependent_glu_layers,
             )
         self.reset_parameters()
@@ -252,11 +258,14 @@ class GLULayer(torch.nn.Module):
 
 
 class AttentiveTransformer(torch.nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, num_cols: int) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+    ) -> None:
         super().__init__()
-        self.num_cols = num_cols
         self.lin = torch.nn.Linear(in_channels, out_channels, bias=False)
-        self.bn = GhostBatchNorm1d(num_cols)
+        self.bn = GhostBatchNorm1d(out_channels)
         self.reset_parameters()
 
     def forward(self, x: torch.Tensor, prior: torch.Tensor) -> torch.Tensor:
@@ -264,8 +273,8 @@ class AttentiveTransformer(torch.nn.Module):
         x = self.bn(x)
         x = prior * x
         # Using softmax instead of sparsemax since softmax performs better.
-        x = F.softmax(x.view(x.shape[0], -1), dim=-1)
-        return x.view(x.shape[0], self.num_cols, -1)
+        x = F.softmax(x, dim=-1)
+        return x
 
     def reset_parameters(self) -> None:
         self.lin.reset_parameters()
