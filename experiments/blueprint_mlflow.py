@@ -145,6 +145,12 @@ def train_model(config: tune.TuneConfig):
             config=config,
         )
 
+        client.log_param(
+            run_id,
+            "model_size",
+            "{:.3f}M".format(sum(p.numel() for p in model.parameters()) / 1_000_000),
+        )
+
         lightning_model = LightningWrapper(
             model,
             dataset.defaults.target_table,
@@ -256,7 +262,7 @@ def run_experiment(
             local_dir=log_dir,
             resume=False,
             config={
-                "lr": tune.loguniform(0.00005, 0.001, base=10),
+                "lr": 0.001,
                 "betas": [0.9, 0.999],
                 "embed_dim": tune.choice([32, 64]),
                 "aggr": tune.choice(["sum"]),
