@@ -1,4 +1,3 @@
-import copy
 from typing import Callable, List, Dict, Union, Optional, Any, Tuple
 
 import torch
@@ -13,7 +12,7 @@ from torch_frame.nn import StypeEncoder
 from torch_frame.data import StatType
 
 from db_transformer.nn import (
-    CrossAttentionConv,
+    MeanAddConv,
     DBEmbedder,
     NodeApplied,
     PositionalEncoding,
@@ -31,27 +30,24 @@ class BlueprintModel(torch.nn.Module):
         col_names_dict_per_table: Dict[NodeType, Dict[stype, List[str]]],
         edge_types: Optional[List[EdgeType]] = None,
         stype_encoder_dict: Optional[Dict[torch_frame.stype, StypeEncoder]] = None,
+        post_embedder: Optional[
+            Union[torch.nn.Module, Callable[[NodeType, List[str]], torch.nn.Module]]
+        ] = None,
         positional_encoding: bool = True,
         positional_encoding_dropout: float = 0,
-        per_column_embedding: bool = True,
         num_gnn_layers: int = 1,
-        table_transform: Optional[
+        pre_combination: Optional[
             Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
         ] = None,
-        table_transform_unique: bool = True,
-        table_transform_dropout: Optional[float] = None,
-        table_transform_residual: bool = False,
-        table_transform_norm: bool = True,
         table_combination: Optional[
             Union[
                 torch.nn.Module,
-                Callable[[int, str, Tuple[List[str], List[str]]], torch.nn.Module],
+                Callable[[int, EdgeType, Tuple[List[str], List[str]]], torch.nn.Module],
             ]
         ] = None,
-        table_combination_unique: bool = True,
-        table_combination_dropout: Optional[float] = None,
-        table_combination_residual: bool = False,
-        table_combination_norm: bool = True,
+        post_combination: Optional[
+            Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
+        ] = None,
         decoder_aggregation: AggrFunction = torch.nn.Identity(),
         decoder: Optional[
             Union[torch.nn.Module, Callable[[List[str]], torch.nn.Module]]
@@ -64,181 +60,96 @@ class BlueprintModel(torch.nn.Module):
         self.target_col = target[1]
         self.node_types = list(col_names_dict_per_table.keys())
         self.edge_types = edge_types
-        self.embedded_stypes = (
-            list(stype_encoder_dict.keys())
-            if stype_encoder_dict is not None
-            else [stype.categorical, stype.numerical]
-        )
-        self.embedded_cols: Dict[NodeType, List[str]] = {}
-        for node, cols_dict in col_names_dict_per_table.items():
-            self.embedded_cols[node] = []
-            for stype, cols in cols_dict.items():
-                if stype not in self.embedded_stypes:
-                    continue
-                self.embedded_cols[node].extend(cols)
-            if len(self.embedded_cols[node]) == 0:
-                self.embedded_cols[node] = ["__filler"]
 
-        embedder_layers: List[Tuple[str, torch.nn.Module]] = []
-
-        embedder_layers.append(
-            (
-                DBEmbedder(
-                    embed_dim=embed_dim,
-                    col_stats_per_table=col_stats_per_table,
-                    col_names_dict_per_table=col_names_dict_per_table,
-                    stype_encoder_dict=stype_encoder_dict,
-                    return_cols=False,
-                ),
-                "tf_dict -> x_dict",
-            )
+        self.embedder = DBEmbedder(
+            embed_dim=embed_dim,
+            col_stats_dict=col_stats_per_table,
+            col_names_dict_per_table=col_names_dict_per_table,
+            stype_encoder_dict=stype_encoder_dict,
         )
 
         if positional_encoding:
-            embedder_layers.append(
-                (
-                    NodeApplied(
-                        lambda _: PositionalEncoding(
-                            embed_dim, positional_encoding_dropout
-                        ),
-                        self.node_types,
-                    ),
-                    "x_dict -> x_dict",
-                )
+            self.positional_encoding = NodeApplied(
+                lambda _: PositionalEncoding(embed_dim, positional_encoding_dropout),
+                self.node_types,
             )
-        if not per_column_embedding:
-            embedder_layers.append(
-                (
-                    NodeApplied(
-                        lambda _: lambda x: x.view(*x.shape[:-2], -1),
-                        self.node_types,
-                    ),
-                    "x_dict -> x_dict",
-                )
-            )
+        else:
+            self.positional_encoding = None
 
-        self.embedder = Sequential("tf_dict", embedder_layers)
+        if post_embedder is not None:
+            self.post_embedder = NodeApplied(
+                lambda node: (
+                    post_embedder
+                    if isinstance(post_embedder, torch.nn.Module)
+                    else post_embedder(node, self.embedder.active_cols_dict[node])
+                ),
+                self.node_types,
+            )
+        else:
+            self.post_embedder = None
 
         layers: List[Tuple[str, torch.nn.Module]] = []
 
-        def create_table_transform(node):
-            if isinstance(table_transform, torch.nn.Module):
-                return (
-                    copy.deepcopy(table_transform)
-                    if table_transform_unique
-                    else table_transform
-                )
+        if table_combination is None:
+            table_combination = MeanAddConv()
+
+        def create_pre_combination_transform(node):
+            if isinstance(pre_combination, torch.nn.Module):
+                return pre_combination
             else:
-                return table_transform(i, node, self.embedded_cols[node])
+                return pre_combination(i, node, self.embedder.active_cols_dict[node])
 
         def create_table_combination(edge_type):
-            if is_combination_module:
-                return (
-                    copy.deepcopy(table_combination)
-                    if table_combination_unique
-                    else table_combination
-                )
+            if isinstance(table_combination, torch.nn.Module):
+                return table_combination
             else:
                 return table_combination(
                     i,
                     edge_type,
-                    (self.embedded_cols[edge_type[0]], self.embedded_cols[edge_type[2]]),
+                    (
+                        self.embedder.active_cols_dict[edge_type[0]],
+                        self.embedder.active_cols_dict[edge_type[2]],
+                    ),
                 )
 
+        def create_post_combination_transform(node):
+            if isinstance(post_combination, torch.nn.Module):
+                return post_combination
+            else:
+                return post_combination(i, node, self.embedder.active_cols_dict[node])
+
         for i in range(num_gnn_layers):
-            if table_transform is not None:
+            if pre_combination is not None:
                 layers.append(
                     (
                         NodeApplied(
-                            create_table_transform,
+                            create_pre_combination_transform,
                             self.node_types,
                         ),
-                        f"x_dict_{i} -> x_dict",
+                        f"x_dict_{i} -> x_dict_{i}",
                     )
                 )
-                if table_transform_dropout is None:
-                    layers.append(
-                        (
-                            NodeApplied(
-                                lambda _: torch.nn.Dropout(table_transform_dropout),
-                                self.node_types,
-                            ),
-                            "x_dict -> x_dict",
-                        )
-                    )
-                if table_transform_residual:
-                    layers.append(
-                        (
-                            NodeApplied(
-                                lambda _: lambda x1, x2: x1 + x2,
-                                self.node_types,
-                                learnable=False,
-                                dynamic_args=True,
-                            ),
-                            f"x_dict_{i}, x_dict -> x_dict",
-                        )
-                    )
-                if table_transform_norm:
-                    layers.append(
-                        (
-                            NodeApplied(
-                                lambda node: torch.nn.BatchNorm1d(
-                                    len(self.embedded_cols[node])
-                                ),
-                                self.node_types,
-                            ),
-                            "x_dict -> x_dict",
-                        )
-                    )
 
             if edge_types is None or len(edge_types) == 0:
-                layers.append((torch.nn.Identity(), f"x_dict -> x_dict_{i+1}"))
+                layers.append((torch.nn.Identity(), f"x_dict_{i} -> x_dict_{i+1}"))
                 continue
 
-            if table_combination is None:
-                table_combination = CrossAttentionConv(embed_dim, 4)
-            is_combination_module = isinstance(table_combination, torch.nn.Module)
             convs = {
                 edge_type: create_table_combination(edge_type)
                 for edge_type in self.edge_types
             }
 
-            layers.append((HeteroConv(convs), f"x_dict, edge_dict -> x_dict_{i+1}"))
+            layers.append((HeteroConv(convs), f"x_dict_{i}, edge_dict -> x_dict_{i+1}"))
 
-            if table_combination_dropout is None:
+            if post_combination is not None:
                 layers.append(
                     (
                         NodeApplied(
-                            lambda _: torch.nn.Dropout(table_combination_dropout),
+                            create_post_combination_transform,
                             self.node_types,
-                        ),
-                        f"x_dict_{i+1} -> x_dict_{i+1}",
-                    )
-                )
-
-            if table_combination_residual:
-                layers.append(
-                    (
-                        NodeApplied(
-                            lambda _: lambda x1, x2: x1 + x2,
-                            self.node_types,
-                            learnable=False,
                             dynamic_args=True,
                         ),
-                        f"x_dict_{i+1}, x_dict -> x_dict_{i+1}",
-                    )
-                )
-
-            if table_combination_norm:
-                layers.append(
-                    (
-                        NodeApplied(
-                            lambda node: torch.nn.BatchNorm1d(
-                                len(self.embedded_cols[node])
-                            ),
-                            self.node_types,
-                        ),
-                        f"x_dict_{i+1} -> x_dict_{i+1}",
+                        f"x_dict_{i}, x_dict_{i+1} -> x_dict_{i+1}",
                     )
                 )
 
@@ -250,11 +161,10 @@ class BlueprintModel(torch.nn.Module):
 
         self.decoder = torch.nn.Sequential()
         if decoder is not None:
-
             self.decoder.append(
                 decoder
                 if isinstance(decoder, torch.nn.Module)
-                else decoder(self.embedded_cols[self.target_table])
+                else decoder(self.embedder.active_cols_dict[self.target_table])
             )
 
         if output_activation is not None:
@@ -268,6 +178,12 @@ class BlueprintModel(torch.nn.Module):
         tf_dict, edge_dict = self._remove_empty(tf_dict, edge_dict)
 
         x_dict = self.embedder(tf_dict)
+
+        if self.positional_encoding is not None:
+            x_dict = self.positional_encoding(x_dict)
+
+        if self.post_embedder is not None:
+            x_dict = self.post_embedder(x_dict)
 
         x_dict = self.hetero_gnn(x_dict, edge_dict)
 

@@ -24,7 +24,7 @@ class AttentionAggregation(Aggregation):
         if dim == -2:
             x = x.unsqueeze(-2)
 
-        x_mean = scatter(x, index, dim, dim_size, reduce="mean")
+        x_mean = scatter(x, index, dim=-3, dim_size=dim_size, reduce="mean")
 
         key = x_mean.index_select(dim=-3, index=index)
         query = x

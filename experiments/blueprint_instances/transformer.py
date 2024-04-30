@@ -2,14 +2,17 @@ from typing import List, Dict, Any
 
 import torch
 
+from torch_geometric.nn import Sequential
 from torch_geometric.typing import NodeType, EdgeType
 
+from torch_frame import stype
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
 from db_transformer.nn import (
     BlueprintModel,
     CrossAttentionConv,
+    ResidualNorm,
     SelfAttention,
 )
 
@@ -18,7 +21,7 @@ from .utils import get_decoder, get_encoder
 
 def create_transformer_model(
     defaults: CTUDatasetDefault,
-    col_names_dict: Dict[NodeType, List[str]],
+    col_names_dict: Dict[NodeType, Dict[stype, List[str]]],
     edge_types: List[EdgeType],
     col_stats_dict: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
     config: Dict[str, Any],
@@ -29,10 +32,9 @@ def create_transformer_model(
     embed_dim = config.get("embed_dim", 64)
     encoder = config.get("encoder", "basic")
     gnn_layers = config.get("gnn_layers", 1)
-    batch_norm = config.get("batch_norm", False)
     mlp_dims = config.get("mlp_dims", [])
     num_heads = config.get("num_heads", 1)
-    residual = config.get("residual", False)
+    batch_norm = config.get("batch_norm", False)
     dropout = config.get("dropout", 0)
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
@@ -51,30 +53,51 @@ def create_transformer_model(
         edge_types=edge_types,
         stype_encoder_dict=get_encoder(encoder),
         positional_encoding=False,
-        per_column_embedding=True,
         num_gnn_layers=gnn_layers,
-        table_transform=lambda i, node, cols: torch.nn.Sequential(
-            SelfAttention(embed_dim // 2**i, num_heads=num_heads),
-            torch.nn.Linear(embed_dim // 2**i, embed_dim // 2 ** (i + 1)),
+        pre_combination=lambda i, node, cols: Sequential(
+            "x_in",
+            [
+                (
+                    SelfAttention(embed_dim, num_heads, dropout=dropout),
+                    "x_in -> x_next",
+                ),
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_in"),
+                (
+                    torch.nn.Sequential(
+                        torch.nn.Linear(embed_dim, embed_dim),
+                        torch.nn.ReLU(),
+                        torch.nn.Linear(embed_dim, embed_dim),
+                    ),
+                    "x_in -> x_next",
+                ),
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_out"),
+            ],
         ),
-        table_transform_unique=True,
         table_combination=lambda i, edge, cols: CrossAttentionConv(
-            embed_dim // 2 ** (i + 1), num_heads=num_heads
+            embed_dim, num_heads=num_heads, dropout=dropout, aggr="attn"
         ),
-        table_combination_unique=True,
+        post_combination=lambda i, node, cols: Sequential(
+            "x_in, x_next",
+            [
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_in"),
+                (
+                    torch.nn.Sequential(
+                        torch.nn.Linear(embed_dim, embed_dim),
+                        torch.nn.ReLU(),
+                        torch.nn.Linear(embed_dim, embed_dim),
+                    ),
+                    "x_in -> x_next",
+                ),
+                (ResidualNorm(embed_dim), "x_in, x_next -> x_out"),
+            ],
+        ),
         decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
         decoder=lambda cols: get_decoder(
-            len(cols) * embed_dim // 2 ** max(gnn_layers, 0),
+            len(cols) * embed_dim,
             output_dim,
             mlp_dims,
             batch_norm,
+            out_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         ),
-        output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
-        table_transform_dropout=dropout,
-        table_combination_dropout=dropout,
-        table_transform_residual=False,
-        table_combination_residual=residual,
-        table_transform_norm=batch_norm,
-        table_combination_norm=batch_norm,
     )

@@ -5,6 +5,7 @@ import torch
 from torch_geometric.typing import NodeType, EdgeType
 from torch_geometric.nn import conv
 
+from torch_frame import stype
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
@@ -15,7 +16,7 @@ from .utils import get_decoder, get_encoder
 
 def create_honza_model(
     defaults: CTUDatasetDefault,
-    col_names_dict: Dict[NodeType, List[str]],
+    col_names_dict: Dict[NodeType, Dict[stype, List[str]]],
     edge_types: List[EdgeType],
     col_stats_dict: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
     config: Dict[str, Any],
@@ -43,10 +44,10 @@ def create_honza_model(
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
         stype_encoder_dict=get_encoder("basic"),
+        post_embedder=lambda node, cols: lambda x: x.view(*x.shape[:-2], -1),
         positional_encoding=False,
-        per_column_embedding=False,
         num_gnn_layers=gnn_layers,
-        table_transform=lambda i, node, cols: (
+        pre_combination=lambda i, node, cols: (
             torch.nn.Identity()
             if i == 0
             else torch.nn.Sequential(
@@ -60,7 +61,6 @@ def create_honza_model(
                 torch.nn.ReLU(),
             )
         ),
-        table_transform_unique=True,
         table_combination=lambda i, edge, cols: conv.SAGEConv(
             (
                 len(cols[0]) * (embed_dim // 2**i),
@@ -69,17 +69,13 @@ def create_honza_model(
             len(cols[1]) * (embed_dim // 2 ** (i + 1)),
             aggr="sum",
         ),
-        table_combination_unique=True,
         decoder_aggregation=torch.nn.Identity(),
         decoder=lambda cols: get_decoder(
-            len(cols) * embed_dim // 2**gnn_layers, output_dim, mlp_dims, batch_norm
+            len(cols) * embed_dim // 2**gnn_layers,
+            output_dim,
+            mlp_dims,
+            batch_norm,
+            out_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         ),
-        output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
-        table_transform_dropout=0.0,
-        table_combination_dropout=0.0,
-        table_transform_residual=False,
-        table_combination_residual=False,
-        table_transform_norm=False,
-        table_combination_norm=False,
     )

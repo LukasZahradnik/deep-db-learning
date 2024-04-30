@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple, Union, Literal, Optional
+from typing import Any, Callable, Dict, List, Set, Tuple, Union, Literal, Optional
 import warnings
 
 import torch
@@ -13,7 +13,6 @@ from torch_frame.nn import (
     StypeEncoder,
     EmbeddingEncoder,
     LinearEncoder,
-    TimestampEncoder,
 )
 
 
@@ -22,7 +21,7 @@ class TableEmbedder(StypeWiseFeatureEncoder):
         self,
         embed_dim: int,
         col_stats: dict[str, dict[StatType, Any]],
-        col_names_dict: dict[stype, list[str]],
+        col_names_dict: dict[stype, List[str]],
         stype_encoder_dict: dict[stype, StypeEncoder],
     ) -> None:
         self.embed_dim = embed_dim
@@ -32,7 +31,22 @@ class TableEmbedder(StypeWiseFeatureEncoder):
                 warnings.warn(
                     f"Encoder for stype.{stype} is not present. Columns of this stype will be ignored."
                 )
-        self.active_stypes = list(stype_encoder_dict.keys())
+        self._active_stypes = {
+            _stype: col_names_dict.get(_stype, [])
+            for _stype in stype_encoder_dict
+            if _stype in col_names_dict
+        }
+        self._active_cols = [
+            col for _stype in self._active_stypes for col in col_names_dict.get(_stype, [])
+        ]
+
+    @property
+    def active_stypes(self) -> Dict[stype, List[str]]:
+        return self._active_stypes
+
+    @property
+    def active_cols(self) -> List[str]:
+        return self._active_cols
 
     def forward(self, tf: TensorFrame) -> Tuple[torch.Tensor, List[str]]:
         r"""Encode :class:`TensorFrame` object into a tuple
@@ -43,13 +57,9 @@ class TableEmbedder(StypeWiseFeatureEncoder):
                 object.
 
         Returns:
-            (torch.Tensor, List[str]): A tuple of an output column-wise
-                :class:`torch.Tensor` of shape
-                :obj:`[batch_size, num_cols, hidden_channels]` and a list of
-                column names of  :obj:`x`. The length needs to be
-                :obj:`num_cols`.
+            torch.Tensor: An output column-wise :class:`torch.Tensor` of shape
+                :obj:`[batch_size, num_cols, hidden_channels]`
         """
-        all_col_names = []
         xs = []
         for _stype in tf.stypes:
             # Skip if the stype encoder is not defined.
@@ -59,32 +69,30 @@ class TableEmbedder(StypeWiseFeatureEncoder):
             col_names = self.col_names_dict[_stype]
             x = self.encoder_dict[_stype.value](feat, col_names)
             xs.append(x)
-            all_col_names.extend(col_names)
         if len(xs) == 0:
-            x = torch.zeros((tf.num_rows, 1, self.embed_dim), dtype=torch.float32).to(tf.device)
+            x = torch.zeros((tf.num_rows, 1, self.embed_dim), dtype=torch.float32).to(
+                tf.device
+            )
         else:
             x = torch.cat(xs, dim=1)
-        return x, all_col_names
+        return x
 
 
 class DBEmbedder(torch.nn.Module):
     def __init__(
         self,
-        embed_dim: Union[int, Dict[NodeType, int]],
-        col_stats_per_table: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
+        embed_dim: int,
+        col_stats_dict: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
         col_names_dict_per_table: Dict[NodeType, Dict[stype, List[str]]],
         stype_encoder_dict: Optional[Dict[stype, StypeEncoder]] = None,
-        return_cols: bool = True,
     ) -> None:
         super().__init__()
 
-        self.return_cols = return_cols
+        self.active_cols_dict: Dict[NodeType, List[str]] = {}
+        self.active_stypes_dict: Dict[stype, List[str]] = {}
 
-        self.table_embedders = torch.nn.ModuleDict()
+        self.embedders = torch.nn.ModuleDict()
         for table_name in col_names_dict_per_table:
-            table_embed_dim = (
-                embed_dim[table_name] if isinstance(embed_dim, dict) else embed_dim
-            )
 
             table_stype_embedder_dict = deepcopy(stype_encoder_dict)
             if table_stype_embedder_dict is None:
@@ -97,22 +105,21 @@ class DBEmbedder(torch.nn.Module):
                     ),
                 }
 
-            self.table_embedders[table_name] = TableEmbedder(
-                embed_dim=table_embed_dim,
-                col_stats=col_stats_per_table[table_name],
+            embedder = TableEmbedder(
+                embed_dim=embed_dim,
+                col_stats=col_stats_dict[table_name],
                 col_names_dict=col_names_dict_per_table[table_name],
                 stype_encoder_dict=table_stype_embedder_dict,
             )
+            self.embedders[table_name] = embedder
+            self.active_cols_dict[table_name] = embedder.active_cols
+            if len(embedder.active_cols) == 0:
+                self.active_cols_dict[table_name] = ["__filler"]
+            self.active_stypes_dict[table_name] = embedder.active_stypes
 
     def forward(self, tf_dict: Dict[NodeType, TensorFrame]) -> Dict[NodeType, torch.Tensor]:
         x_dict = {}
-        cols_dict = {}
         for table_name, tf in tf_dict.items():
-            x, cols = self.table_embedders[table_name](tf)
-            x_dict[table_name] = x
-            cols_dict[table_name] = cols
+            x_dict[table_name] = self.embedders[table_name](tf)
 
-        if not self.return_cols:
-            return x_dict
-
-        return x_dict, cols_dict
+        return x_dict

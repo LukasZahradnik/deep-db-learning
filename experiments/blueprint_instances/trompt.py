@@ -4,22 +4,17 @@ import torch
 
 from torch_geometric.typing import NodeType, EdgeType
 
+from torch_frame import NAStrategy, stype
 from torch_frame.data import StatType
-from torch_frame.nn import conv
+from torch_frame.nn import encoder
 
 from db_transformer.data import CTUDatasetDefault, TaskType
-from db_transformer.nn import (
-    BlueprintModel,
-    CrossAttentionConv,
-    SelfAttention,
-)
-
-from .utils import get_decoder, get_encoder
+from db_transformer.nn import BlueprintModel, MeanAddConv, TromptEncoder, TromptDecoder
 
 
-def create_transformer_model(
+def create_trompt_model(
     defaults: CTUDatasetDefault,
-    col_names_dict: Dict[NodeType, List[str]],
+    col_names_dict: Dict[NodeType, Dict[stype, List[str]]],
     edge_types: List[EdgeType],
     col_stats_dict: Dict[NodeType, Dict[str, Dict[StatType, Any]]],
     config: Dict[str, Any],
@@ -28,13 +23,8 @@ def create_transformer_model(
     target = defaults.target
 
     embed_dim = config.get("embed_dim", 64)
-    encoder = config.get("encoder", "basic")
     gnn_layers = config.get("gnn_layers", 1)
-    batch_norm = config.get("batch_norm", False)
-    mlp_dims = config.get("mlp_dims", [])
-    num_heads = config.get("num_heads", 1)
-    residual = config.get("residual", False)
-    dropout = config.get("dropout", 0)
+    num_trompt_layers = 6
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
 
@@ -50,32 +40,35 @@ def create_transformer_model(
         col_stats_per_table=col_stats_dict,
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
-        stype_encoder_dict=get_encoder(encoder),
+        stype_encoder_dict={
+            stype.categorical: encoder.EmbeddingEncoder(
+                na_strategy=NAStrategy.MOST_FREQUENT,
+                post_module=torch.nn.LayerNorm([embed_dim]),
+            ),
+            stype.numerical: encoder.LinearEncoder(
+                na_strategy=NAStrategy.MEAN,
+                post_module=torch.nn.Sequential(
+                    torch.nn.ReLU(), torch.nn.LayerNorm([embed_dim])
+                ),
+            ),
+        },
         positional_encoding=False,
-        per_column_embedding=True,
+        post_embedder=lambda node, cols: (
+            TromptEncoder(
+                channels=embed_dim,
+                num_cols=len(cols),
+                num_prompts=embed_dim,
+                num_layers=num_trompt_layers,
+            )
+        ),
         num_gnn_layers=gnn_layers,
-        table_transform=lambda i, node, cols: torch.nn.Sequential(
-            SelfAttention(embed_dim // 2**i, num_heads=num_heads),
-            torch.nn.Linear(embed_dim // 2**i, embed_dim // 2 ** (i + 1)),
-        ),
-        table_transform_unique=True,
-        table_combination=lambda i, edge, cols: CrossAttentionConv(
-            embed_dim // 2 ** (i + 1), num_heads=num_heads
-        ),
-        table_combination_unique=True,
-        decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
-        decoder=lambda cols: get_decoder(
-            len(cols) * embed_dim // 2 ** max(gnn_layers, 0),
+        table_combination=lambda i, edge, cols: MeanAddConv(),
+        decoder=lambda cols: TromptDecoder(
+            embed_dim,
             output_dim,
-            mlp_dims,
-            batch_norm,
+            num_prompts=embed_dim,
+            num_encoder_layers=num_trompt_layers,
         ),
         output_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
         positional_encoding_dropout=0.0,
-        table_transform_dropout=dropout,
-        table_combination_dropout=dropout,
-        table_transform_residual=False,
-        table_combination_residual=residual,
-        table_transform_norm=batch_norm,
-        table_combination_norm=batch_norm,
     )
