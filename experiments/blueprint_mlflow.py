@@ -110,25 +110,23 @@ def train_model(config: tune.TuneConfig):
 
         total_samples = data[target[0]].y.shape[0]
 
-        min_batch_size = max(16, int(2 ** np.around(np.log2(total_samples / 100))))
+        min_batch_size = max(16, int(2 ** np.around(np.log2(total_samples / 500))))
         batch_size = min(min_batch_size * 2 ** config["batch_size_scale"], 16384)
         client.log_param(run_id, "batch_size", batch_size)
 
         train_loader = HGTLoader(
             data,
-            num_samples=[MAX_NEIGHBORS] * config.get("gnn_layers", 1),
+            num_samples=[MAX_NEIGHBORS] * max(2, config.get("gnn_layers", 1)),
             batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].train_mask),
-            subgraph_type="bidirectional",
             shuffle=True,
         )
 
         val_loader = HGTLoader(
             data,
-            num_samples=[MAX_NEIGHBORS] * config.get("gnn_layers", 1),
+            num_samples=[MAX_NEIGHBORS] * max(2, config.get("gnn_layers", 1)),
             batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].val_mask),
-            subgraph_type="bidirectional",
             shuffle=True,
         )
 
@@ -136,15 +134,15 @@ def train_model(config: tune.TuneConfig):
 
         model = create_blueprint_model(
             config["model_type"],
-            dataset.defaults,
-            {
+            defaults=dataset.defaults,
+            col_names_dict={
                 node: tf.col_names_dict
                 for node, tf in data.collect("tf").items()
                 if tf.num_rows > 0
             },
-            edge_types,
-            col_stats_dict,
-            config,
+            edge_types=edge_types,
+            col_stats_dict=col_stats_dict,
+            config=config,
         )
 
         lightning_model = LightningWrapper(
