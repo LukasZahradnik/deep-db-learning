@@ -94,7 +94,23 @@ class LightningWrapper(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, betas=self.betas)
+        self.opt = torch.optim.Adam(self.parameters(), lr=self.lr, betas=self.betas)
+        self.reduce_lr_on_plateau = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            factor=0.5,
+            patience=2,
+            cooldown=2,
+            min_lr=1e-5,
+            verbose=True,
+        )
+        return {
+            "optimizer": self.opt,
+            "lr_scheduler": {
+                "scheduler": self.reduce_lr_on_plateau,
+                "monitor": "val_loss",
+            },
+        }
 
     def training_step(self, batch):
         loss = self.forward(batch, "train")
