@@ -49,10 +49,14 @@ class BlueprintModel(torch.nn.Module):
             Union[torch.nn.Module, Callable[[int, NodeType, List[str]], torch.nn.Module]]
         ] = None,
         decoder_aggregation: AggrFunction = torch.nn.Identity(),
+        pretrain_decoder: Optional[
+            Union[torch.nn.Module, Callable[[NodeType, List[str]], torch.nn.Module]]
+        ] = None,
         decoder: Optional[
             Union[torch.nn.Module, Callable[[List[str]], torch.nn.Module]]
         ] = None,
         output_activation: Optional[torch.nn.Module] = None,
+        pretrain_swap_prob: float = 0.2,
     ):
         super().__init__()
 
@@ -60,6 +64,7 @@ class BlueprintModel(torch.nn.Module):
         self.target_col = target[1]
         self.node_types = list(col_names_dict_per_table.keys())
         self.edge_types = edge_types
+        self.pretrain_swap_prob = max(min(pretrain_swap_prob, 1.0), 0.0)
 
         self.embedder = DBEmbedder(
             embed_dim=embed_dim,
@@ -159,6 +164,18 @@ class BlueprintModel(torch.nn.Module):
 
         self.decoder_aggregation = decoder_aggregation
 
+        if pretrain_decoder is not None:
+            self.pretrain_decoder = NodeApplied(
+                lambda node: (
+                    pretrain_decoder
+                    if isinstance(decoder, torch.nn.Module)
+                    else pretrain_decoder(node, self.embedder.active_cols_dict[node])
+                ),
+                self.node_types,
+            )
+        else:
+            self.pretrain_decoder = None
+
         self.decoder = torch.nn.Sequential()
         if decoder is not None:
             self.decoder.append(
@@ -174,10 +191,17 @@ class BlueprintModel(torch.nn.Module):
         self,
         tf_dict: Dict[NodeType, torch_frame.TensorFrame],
         edge_dict: Dict[EdgeType, torch.Tensor],
-    ):
+        pretrain: bool = False,
+    ) -> Union[
+        torch.Tensor, Tuple[Dict[NodeType, torch.Tensor], Dict[NodeType, torch.Tensor]]
+    ]:
         tf_dict, edge_dict = self._remove_empty(tf_dict, edge_dict)
 
         x_dict = self.embedder(tf_dict)
+
+        if pretrain:
+            assert self.pretrain_decoder is not None
+            x_dict, mask_dict = self._pretrain_masked_swap(x_dict)
 
         if self.positional_encoding is not None:
             x_dict = self.positional_encoding(x_dict)
@@ -186,6 +210,14 @@ class BlueprintModel(torch.nn.Module):
             x_dict = self.post_embedder(x_dict)
 
         x_dict = self.hetero_gnn(x_dict, edge_dict)
+
+        if pretrain:
+            return (
+                self.pretrain_decoder(
+                    {node: self.decoder_aggregation(x) for node, x in x_dict.items()}
+                ),
+                mask_dict,
+            )
 
         x_target = x_dict[self.target_table]
 
@@ -212,3 +244,27 @@ class BlueprintModel(torch.nn.Module):
                 out_edge_dict[edge] = edge_index
 
         return out_tf_dict, out_edge_dict
+
+    def _pretrain_masked_swap(self, x_dict: Dict[NodeType, torch.Tensor]):
+        mask_dict: Dict[NodeType, torch.Tensor] = {}
+        x_swap_dict: Dict[NodeType, torch.Tensor] = {}
+        for node, x in x_dict.items():
+            b, c, d = x.shape
+            # Get indicies for embeddings swap
+            idx = torch.randperm(b * c)
+            # Check for indicies that stayed the same
+            not_same_mask = torch.logical_not(torch.eq(idx, torch.arange(0, b * c)))
+            # Create mask for embeddings from Bernoulli distribution
+            mask_dict[node] = torch.logical_and(
+                torch.bernoulli(torch.ones(b, c) * self.pretrain_swap_prob),
+                not_same_mask.view(b, c),
+            ).float()
+            print(mask_dict[node].shape)
+            # Create swaped tensor
+            x_swap = x.view(b * c, d).index_select(dim=0, index=idx).view(b, c, d)
+            # Select from swap tensor only when mask is active
+            x_swap_dict[node] = x.masked_scatter(
+                mask_dict[node].bool().unsqueeze(-1).expand(b, c, d), x_swap
+            )
+
+        return x_swap_dict, mask_dict
