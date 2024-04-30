@@ -11,7 +11,7 @@ from torch_frame.data import StatType
 from db_transformer.data import CTUDatasetDefault, TaskType
 from db_transformer.nn import (
     BlueprintModel,
-    MeanSumConv,
+    MeanAddConv,
     ResidualNorm,
     SelfAttention,
 )
@@ -81,7 +81,7 @@ def create_tabtransformer_model(
                 ),
             ],
         ),
-        table_combination=lambda i, edge, cols: MeanSumConv(),
+        table_combination=lambda i, edge, cols: MeanAddConv(),
         decoder_aggregation=lambda x: x.view(*x.shape[:-2], -1),
         decoder=lambda cols: get_decoder(
             len(cols) * embed_dim,

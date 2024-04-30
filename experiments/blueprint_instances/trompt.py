@@ -9,7 +9,7 @@ from torch_frame.data import StatType
 from torch_frame.nn import encoder
 
 from db_transformer.data import CTUDatasetDefault, TaskType
-from db_transformer.nn import BlueprintModel, MeanSumConv, TromptEncoder, TromptDecoder
+from db_transformer.nn import BlueprintModel, MeanAddConv, TromptEncoder, TromptDecoder
 
 
 def create_trompt_model(
@@ -62,7 +62,7 @@ def create_trompt_model(
             )
         ),
         num_gnn_layers=gnn_layers,
-        table_combination=lambda i, edge, cols: MeanSumConv(),
+        table_combination=lambda i, edge, cols: MeanAddConv(),
         decoder=lambda cols: TromptDecoder(
             embed_dim,
             output_dim,
