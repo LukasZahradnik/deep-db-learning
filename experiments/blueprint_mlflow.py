@@ -2,9 +2,11 @@ from argparse import ArgumentParser
 from datetime import datetime, timedelta
 import os, sys
 
+os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
+
 sys.path.append(os.getcwd())
 
-from typing import get_args
+from typing import Literal, get_args
 
 import random
 
@@ -144,7 +146,11 @@ def train_model(config: tune.TuneConfig):
             col_stats_dict=col_stats_dict,
             config=config,
         )
-
+        print(
+            "model_size {:.3f}M".format(
+                sum(p.numel() for p in model.parameters()) / 1_000_000
+            )
+        )
         client.log_param(
             run_id,
             "model_size",
@@ -197,7 +203,7 @@ def train_model(config: tune.TuneConfig):
             ],
             max_time=timedelta(hours=2),
             max_epochs=config["epochs"],
-            min_epochs=10,
+            min_epochs=2,
             max_steps=config["epochs"] * 2,
             enable_checkpointing=False,
             logger=False,
@@ -207,8 +213,41 @@ def train_model(config: tune.TuneConfig):
         client.set_terminated(run_id)
 
     except Exception as e:
+        print(str(e))
         client.set_tag(run_id, "exception", str(e))
         client.set_terminated(run_id, "FAILED")
+
+
+def get_tune_config(
+    model_type: Literal[
+        "excelformer",
+        "honza",
+        "mlp",
+        "saint",
+        "tabnet",
+        "tabtransformer",
+        "transformer",
+        "trompt",
+    ]
+):
+    if model_type == "mlp":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "none",
+            "gnn_layers": 0,
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "batch_norm": tune.choice([True, False]),
+        }
+    if model_type == "honza":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "sum",
+            "gnn_layers": tune.randint(1, 6),
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "batch_norm": tune.choice([True, False]),
+        }
+
+    raise ValueError(f"Unknown model type '{model_type}'")
 
 
 def run_experiment(
@@ -246,10 +285,14 @@ def run_experiment(
 
         analysis: tune.ExperimentAnalysis = tune.run(
             train_model,
-            verbose=1,
             metric=f"best_val_{metric}",
-            mode="max",
-            search_alg=OptunaSearch(),
+            mode="max" if metric == "acc" else "min",
+            verbose=1,
+            search_alg=OptunaSearch(
+                metric=f"best_val_{metric}",
+                mode="max" if metric == "acc" else "min",
+            ),
+            max_concurrent_trials=4,
             checkpoint_config=CheckpointConfig(num_to_keep=1),
             num_samples=num_samples,
             storage_path=log_dir,
@@ -260,15 +303,10 @@ def run_experiment(
             ),
             log_to_file=True,
             local_dir=log_dir,
-            resume=False,
             config={
-                "lr": 0.001,
+                "lr": tune.loguniform(0.00005, 0.002),
                 "betas": [0.9, 0.999],
-                "embed_dim": tune.choice([32, 64]),
-                "aggr": tune.choice(["sum"]),
-                "gnn_layers": tune.randint(1, 5),
-                "mlp_dims": tune.choice([[], [64], [64, 64]]),
-                "batch_norm": tune.choice([True, False]),
+                **get_tune_config(model_type),
                 "batch_size_scale": tune.randint(0, 8),
                 "model_type": model_type,
                 "dataset": dataset,

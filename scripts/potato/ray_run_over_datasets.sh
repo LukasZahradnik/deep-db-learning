@@ -75,7 +75,7 @@ NUM_SAMPLES=4
 EPOCHS=2000
 METRIC="acc"
 if [[ $DATASET_NAME == *"reg"* ]]; then
-  METRIC="mse"
+  METRIC="nrmse"
 fi
 
 # Create log directory
