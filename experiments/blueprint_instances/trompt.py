@@ -24,7 +24,7 @@ def create_trompt_model(
 
     embed_dim = config.get("embed_dim", 64)
     gnn_layers = config.get("gnn_layers", 1)
-    num_trompt_layers = 6
+    num_trompt_layers = config.get("num_trompt_layers", 6)
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
 

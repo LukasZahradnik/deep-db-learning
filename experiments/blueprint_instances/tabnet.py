@@ -32,11 +32,7 @@ def create_tabnet_model(
     embed_dim = config.get("embed_dim", 64)
     gnn_layers = config.get("gnn_layers", 1)
     mlp_dims = config.get("mlp_dims", [])
-
-    num_layers = config.get("num_layers", 1)
-    num_heads = config.get("num_heads", 1)
-    residual = config.get("residual", False)
-    dropout = config.get("dropout", 0.0)
+    num_layers = config.get("num_layers", 5)
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
 

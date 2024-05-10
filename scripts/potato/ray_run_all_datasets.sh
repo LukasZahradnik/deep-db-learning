@@ -14,40 +14,49 @@ fi
 
 EXPERIMENT_ID="all_datasets_${MODEL_TYPE}_$(date '+%d-%m-%Y_%H:%M:%S')"
 
-too_small=('cs' 'MuskSmall' 'nations' 'NBA' 'pubs' 'Pyrimidine' 'SAT' 'trains'
- 'university')
+too_small=(
+    'cs' 'MuskSmall' 'nations' 'NBA' 'pubs' 'Pyrimidine' 'SAT' 'trains' 'university'
+)
+
+too_easy=(
+    'Facebook' 'Airline' 'NCAA' 'AustralianFootball' 'world' 'Elti' 'geneea'
+    'UTube' 'Dunur' 'cs' 'Basketball_women'
+)
+
+invalid_datasets=(
+    'ccs' 'SFScores' 'Walmart' 'Countries'
+)
 
 CPU_CLS_DATASETS=(
-    'Basketball_women' 'Bupa' 'Carcinogenesis' 'Chess' 'CraftBeer' 'cs'
-    'Dallas' 'Dunur' 'Facebook' 'financial' 'genes' 'Hepatitis_std' 'Mesh'
-    'Mondial' 'medical' 'MuskSmall' 'mutagenesis' 'nations' 'NBA' 'NCAA'
-    'Pima' 'PremierLeague' 'PTE' 'SAT' 'Student_loan' 'Toxicology' 'trains'
-    'university' 'UTube' 'UW_std' 'WebKP' 'world'
+    'Bupa' 'Carcinogenesis' 'Chess' 'CraftBeer'
+    'Dallas' 'Dunur' 'financial' 'genes' 'Hepatitis_std' 'Mesh'
+    'Mondial' 'medical' 'MuskSmall' 'mutagenesis' 'NCAA'
+    'Pima' 'PremierLeague' 'PTE' 'Student_loan' 'Toxicology'
+    'UW_std' 'WebKP'
 
-    'AustralianFootball' 'CiteSeer' 'CORA' 'Credit' 'DCG' 'Elti' 'geneea'
-    'Hockey' 'imdb_MovieLens' 'Same_gen' 'voc'
+    'CiteSeer' 'CORA' 'Credit' 'DCG' 'Hockey' 'imdb_MovieLens' 'Same_gen' 'voc'
 )
 GPU_CLS_DATASETS=(
     'ErgastF1' 'ftp' 'PubMed_Diabetes' 'SAP' 'tpcc' 'tpcds'
     
-    'Accidents' 'Airline' 'imdb_ijs' 'legalActs' 'tpcd'
+    'Accidents' 'imdb_ijs' 'legalActs' 'tpcd'
 )
 CPU_REG_DATASETS=(
-    'Biodegradability' 'ccs' 'classicmodels' 'Countries' 'GOSales'
-    'northwind' 'pubs' 'Pyrimidine' 'Triazine'
+    'Biodegradability' 'classicmodels' 'GOSales'
+    'northwind' 'Triazine'
     
     'Basketball_men' 'restbase'
     
-    'AdventureWorks2014' 'FNHK' 'lahman_2014' 'sakila' 'SFScores' 'stats'
+    'AdventureWorks2014' 'FNHK' 'lahman_2014' 'sakila' 'stats'
 )
 GPU_REG_DATASETS=(
     'Grants' 'tpch'
     
-    'ConsumerExpenditures' 'employee' 'SalesDB' 'Seznam' 'Walmart'
+    'ConsumerExpenditures' 'employee' 'SalesDB' 'Seznam'
 )
 
 NUM_SAMPLES=16
-EPOCHS=2000
+EPOCHS=4000
 
 # Create log directory
 mkdir logs/${EXPERIMENT_ID}
@@ -64,7 +73,7 @@ ray_dashboard_address=$ip:$port_dashboard
 
 ray start --head --block --node-ip-address=$ip --port=$port_head \
  --dashboard-host=$ip --dashboard-port=$port_dashboard \
- --num-cpus=64 --num-gpus=4 --memory=400000000000 --object-store-memory=8000000000 \
+ --num-cpus=80 --num-gpus=4 --memory=300000000000 --object-store-memory=8000000000 \
  --log-style=record &> "logs/${EXPERIMENT_ID}/ray_head.log" &
 ray_head=$!
 
