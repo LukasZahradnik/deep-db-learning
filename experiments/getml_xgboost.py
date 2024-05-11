@@ -1,26 +1,33 @@
 import argparse
-import os
+from datetime import datetime
+from pathlib import Path
+import traceback
+import os, sys
+
+sys.path.append(os.getcwd())
 import random
 import uuid
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from typing import Callable, Literal, Optional, TypeVar
+from typing import Callable, Literal, Optional, TypeVar, get_args
 from typing import get_args as t_get_args
 
 import getml
-import lovely_tensors as lt
 import mlflow
+from mlflow.entities import Param
+from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
+
 import numpy as np
 import pandas as pd
 import torch
 import torch_geometric.transforms as T
-from db_transformer.data.dataset_defaults.fit_dataset_defaults import (
-    FITDatasetName,
-    FIT_DATASET_DEFAULTS,
+from db_transformer.data import (
+    CTUDataset,
+    CTUDatasetName,
+    CTU_REPOSITORY_DEFAULTS,
+    CTUDatasetDefault,
     TaskType,
 )
-from db_transformer.data.fit_dataset import FITRelationalDataset
-from db_transformer.data.utils import HeteroDataBuilder
 from db_transformer.schema.columns import (
     CategoricalColumnDef,
     DateColumnDef,
@@ -33,99 +40,18 @@ from db_transformer.schema.columns import (
 )
 from db_transformer.schema.schema import ForeignKeyDef, Schema
 from getml.feature_learning import loss_functions
-from simple_parsing import ArgumentParser, DashVariant
 from sqlalchemy.engine import Connection
-
-lt.monkey_patch()
 
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
 
 
-DEFAULT_DATASET_NAME: FITDatasetName = "CORA"
+DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 
+DEFAULT_EXPERIMENT_NAME = "pelesjak-deep-db-tests"
 
-@dataclass
-class DataConfig:
-    pass
-
-
-@dataclass
-class ModelConfig:
-    depths: list[int]
-
-
-_T = TypeVar("_T")
-
-
-def build_data(
-    c: Callable[[HeteroDataBuilder], _T],
-    dataset=DEFAULT_DATASET_NAME,
-    conn: Optional[Connection] = None,
-    schema: Optional[Schema] = None,
-    device=None,
-) -> _T:
-    has_sub_connection = conn is None
-
-    if has_sub_connection:
-        conn = FITRelationalDataset.create_remote_connection(dataset)
-
-    defaults = FIT_DATASET_DEFAULTS[dataset]
-
-    if schema is None:
-        schema = FITRelationalDataset.create_schema_analyzer(
-            dataset, conn, verbose=True
-        ).guess_schema()
-
-    builder = HeteroDataBuilder(
-        conn,
-        schema,
-        target_table=defaults.target_table,
-        target_column=defaults.target_column,
-        separate_target=True,
-        create_reverse_edges=True,
-        fillna_with=0.0,
-        device=device,
-    )
-    out = c(builder)
-
-    if has_sub_connection:
-        conn.close()
-
-    return out
-
-
-def create_data(
-    dataset=DEFAULT_DATASET_NAME, data_config: Optional[DataConfig] = None, device=None
-):
-    if data_config is None:
-        data_config = DataConfig()
-
-    with FITRelationalDataset.create_remote_connection(dataset) as conn:
-        defaults = FIT_DATASET_DEFAULTS[dataset]
-
-        schema_analyzer = FITRelationalDataset.create_schema_analyzer(
-            dataset, conn, verbose=True
-        )
-        schema = schema_analyzer.guess_schema()
-
-        data_pd, (data, column_defs, colnames) = build_data(
-            lambda builder: (
-                builder._get_dataframes_raw(),
-                builder.build(with_column_names=True),
-            ),
-            dataset=dataset,
-            conn=conn,
-            schema=schema,
-            # device=device
-        )
-
-        n_total = data[defaults.target_table].x.shape[0]
-        T.RandomNodeSplit("train_rest", num_val=int(0.30 * n_total), num_test=0)(data)
-
-        return data, data_pd, schema, defaults, column_defs, colnames
-
+RANDOM_SEED = 42
 
 TARGET_TABLE = "__target_table"
 
@@ -133,50 +59,37 @@ TARGET_TABLE = "__target_table"
 def label_getml_roles(
     data_pd: dict[str, pd.DataFrame],
     schema: Schema,
-    target_table: str,
-    target_column: str,
-    task: TaskType,
+    defaults: CTUDatasetDefault,
 ):
-    data: dict[str, getml.data.DataFrame] = {}
+    df_dict: dict[str, getml.data.DataFrame] = {}
 
-    # for name, df in data_pd.items():
-    #     data[name] = getml.data.DataFrame.from_pandas(df, name=name)
-
-    conn = getml.database.connect_mariadb(
-        host="relational.fit.cvut.cz",
-        dbname="CORA",
-        port=3306,
-        user="guest",
-        password="relational",
-    )
-
-    def load_if_needed(name):
-        if not getml.data.exists(name):
-            data_frame = getml.data.DataFrame.from_db(name=name, table_name=name, conn=conn)
-            data_frame.save()
-        else:
-            data_frame = getml.data.load_data_frame(name)
-        return data_frame
-
-    for tname in data_pd:
-        data[tname] = load_if_needed(tname)
+    for tname, df in data_pd.items():
+        df_dict[tname] = getml.data.DataFrame.from_pandas(df, name=tname)
 
     # add proper roles based on schema
     for table_name, table_def in schema.items():
-        assert table_name in data
-        table = data[table_name]
+        assert table_name in df_dict
+        table = df_dict[table_name]
 
         # foreign key roles
         for fk_def in table_def.foreign_keys:
             table.set_role(fk_def.columns, getml.data.roles.join_key)
-            data[fk_def.ref_table].set_role(fk_def.ref_columns, getml.data.roles.join_key)
+            df_dict[fk_def.ref_table].set_role(
+                fk_def.ref_columns, getml.data.roles.join_key
+            )
             for c in fk_def.columns:
                 table_def.columns[c] = OmitColumnDef()
             for c in fk_def.ref_columns:
                 schema[fk_def.ref_table].columns[c] = OmitColumnDef()
 
+        if "__filler" in table.colnames:
+            table.set_role("__filler", getml.data.roles.categorical)
+
         for column_name, column_def in table_def.columns.items():
-            if table_name == target_table and column_name == target_column:
+            if (
+                table_name == defaults.target_table
+                and column_name == defaults.target_column
+            ):
                 continue
 
             if isinstance(column_def, CategoricalColumnDef):
@@ -210,21 +123,29 @@ def label_getml_roles(
                 table.set_role(column_name, role)
 
     if (
-        task == TaskType.CLASSIFICATION
-        and data_pd[target_table][target_column].nunique() > 2
+        defaults.task
+        == TaskType.CLASSIFICATION
+        # and data_pd[defaults.target_table][defaults.target_column].nunique() > 2
     ):
-        data[TARGET_TABLE] = getml.data.make_target_columns(
-            data[target_table].copy(name=TARGET_TABLE), target_column
-        )
-    else:
-        data[TARGET_TABLE] = data[target_table].copy(name=TARGET_TABLE)
-        data[TARGET_TABLE].set_role(target_column, getml.data.roles.target)
+        base = df_dict[defaults.target_table].copy(name=TARGET_TABLE)
+        unique_values = base[defaults.target_column].unique()
+        df_dict[TARGET_TABLE] = base
 
-    for name, df in data.items():
+        for label in unique_values:
+            col = (base[defaults.target_column] == label).as_num()
+            name = defaults.target_column + "=" + str(label)
+            df_dict[TARGET_TABLE] = df_dict[TARGET_TABLE].with_column(
+                col=col, name=name, role=getml.data.roles.target
+            )
+    else:
+        df_dict[TARGET_TABLE] = df_dict[defaults.target_table].copy(name=TARGET_TABLE)
+        df_dict[TARGET_TABLE].set_role(defaults.target_column, getml.data.roles.target)
+
+    for name, df in df_dict.items():
         for col in df.columns:
             print(name, col, type(df[col]))
 
-    return data
+    return df_dict
 
 
 GetmlTableIdentifier = tuple[str, int | None]
@@ -461,25 +382,31 @@ def evaluate_accuracy(
     targets = strip_targets_prefix(targets, target_column)
     targets_idx_map = {v: i for i, v in enumerate(targets)}
     y_pred = np.argmax(y_pred_prob, 1)
-    y_true_np = y_true.map(targets_idx_map).to_numpy()
+    if y_true.apply(type).eq(str).all():
+        y_true_np = y_true.map(targets_idx_map).to_numpy()
+    else:
+        y_true_np = y_true
     print(list(y_pred), y_pred.shape)
     print(list(y_true_np), y_true_np.shape)
     return np.mean(y_pred == y_true_np)
 
 
-def main(dataset_name: str, data_config: DataConfig, model_config: ModelConfig):
-    data, data_pd, schema, defaults, column_defs, colnames = create_data(
-        dataset_name, data_config
+def main(dataset_name: str, max_depth: int):
+    dataset = CTUDataset(dataset_name, data_dir="./datasets")
+    data, _ = dataset.build_hetero_data()
+
+    defaults = dataset.defaults
+    schema = dataset.schema
+
+    n_total = data[defaults.target_table].y.shape[0]
+    data = T.RandomNodeSplit("train_rest", num_val=int(0.30 * n_total), num_test=0)(data)
+
+    data_df = label_getml_roles(
+        {n: t.df for n, t in dataset.db.table_dict.items()}, schema, defaults
     )
 
-    assert defaults.task == TaskType.CLASSIFICATION
-
-    data_pd = label_getml_roles(
-        data_pd, schema, defaults.target_table, defaults.target_column, defaults.task
-    )
-
-    for name, tbl in data_pd.items():
-        print(name, tbl)
+    # for tname, tbl in data_df.items():
+    #     print(tname, tbl)
 
     # build split
     # split = getml.data.split.random(train=0.7, test=0.3)  # TODO use universal split
@@ -487,121 +414,184 @@ def main(dataset_name: str, data_config: DataConfig, model_config: ModelConfig):
     split = split.map({True: "train", False: "test"}).to_frame("split")
     split = getml.data.DataFrame.from_pandas(split, "split")["split"]
 
-    container = getml.data.Container(population=data_pd[TARGET_TABLE], split=split)
-    container.add(**{k: v for k, v in data_pd.items() if k != TARGET_TABLE})
+    container = getml.data.Container(population=data_df[TARGET_TABLE], split=split)
+    container.add(**{k: v for k, v in data_df.items() if k != TARGET_TABLE})
     container.freeze()
 
-    for max_depth in model_config.depths:
-        nodes, edges = bfs(schema, defaults.target_table, max_depth=max_depth)
-        print(nodes)
-        print(edges)
-        dm = build_getml_datamodel(data_pd, nodes, edges)
-        print(dm)
+    nodes, edges = bfs(schema, defaults.target_table, max_depth=max_depth)
+    print(nodes)
+    print(edges)
+    dm = build_getml_datamodel(data_df, nodes, edges)
+    print(dm)
 
-        mapping = getml.preprocessors.Mapping()
+    mapping = getml.preprocessors.Mapping()
 
+    if defaults.task == TaskType.CLASSIFICATION:
+        predictor = getml.predictors.XGBoostClassifier()
         fast_prop = getml.feature_learning.FastProp(
             loss_function=loss_functions.CrossEntropyLoss,
         )
 
-        feature_selector = getml.predictors.XGBoostClassifier()
-        predictor = getml.predictors.XGBoostClassifier()
-
-        pipe = getml.pipeline.Pipeline(
-            data_model=dm,
-            preprocessors=[mapping],
-            feature_learners=[fast_prop],
-            # feature_selectors=[feature_selector],
-            predictors=[predictor],
-            share_selected_features=0.5,
+    elif defaults.task == TaskType.REGRESSION:
+        predictor = getml.predictors.XGBoostRegressor()
+        fast_prop = getml.feature_learning.FastProp(
+            loss_function=loss_functions.SquareLoss,
         )
+    else:
+        raise ValueError("unsupported task type")
 
-        pipe.fit(container.train)
-        print(pipe.score(container.train))
-        y_pred_prob = pipe.predict(container.train)
-        assert y_pred_prob is not None
-        print(
-            "train_acc:",
-            evaluate_accuracy(
-                pipe.targets,
-                defaults.target_column,
-                y_pred_prob,
-                data_pd[defaults.target_table][split == "train"].to_pandas()[
-                    defaults.target_column
-                ],
-            ),
-        )
-        print(pipe.score(container.test))
-        y_pred_prob = pipe.predict(container.test)
-        print(
-            "test_acc:",
-            evaluate_accuracy(
-                pipe.targets,
-                defaults.target_column,
-                y_pred_prob,
-                data_pd[defaults.target_table][split == "test"].to_pandas()[
-                    defaults.target_column
-                ],
-            ),
-        )
+    pipe = getml.pipeline.Pipeline(
+        data_model=dm,
+        preprocessors=[mapping],
+        feature_learners=[fast_prop],
+        # feature_selectors=[feature_selector],
+        predictors=[predictor],
+        share_selected_features=0.5,
+    )
 
-    return split, container, data_pd, pipe  # TODO remove
+    pipe = pipe.fit(container.train)
+    y_pred = pipe.predict(container.train)
+    assert y_pred is not None
+
+    # print(pipe.score(container.train))
+
+    metrics = {}
+    if defaults.task == TaskType.CLASSIFICATION:
+        train_acc = evaluate_accuracy(
+            pipe.targets,
+            defaults.target_column,
+            y_pred,
+            data_df[defaults.target_table][split == "train"].to_pandas()[
+                defaults.target_column
+            ],
+        )
+        print("train_acc:", train_acc)
+        metrics["best_train_acc"] = train_acc
+    if defaults.task == TaskType.REGRESSION:
+        target_vals: np.ndarray = (
+            data_df[defaults.target_table][split == "train"]
+            .to_pandas()[defaults.target_column]
+            .apply(float)
+            .to_numpy()
+        )
+        train_nrmse = (
+            np.sqrt(((y_pred.squeeze() - target_vals) ** 2).mean()) / target_vals.mean()
+        )
+        print("train_nrmse:", train_nrmse)
+        metrics["best_train_nrmse"] = train_nrmse
+
+    y_pred = pipe.predict(container.test)
+
+    # print(pipe.score(container.test))
+
+    if defaults.task == TaskType.CLASSIFICATION:
+        test_acc = evaluate_accuracy(
+            pipe.targets,
+            defaults.target_column,
+            y_pred,
+            data_df[defaults.target_table][split == "test"].to_pandas()[
+                defaults.target_column
+            ],
+        )
+        print("test_acc:", test_acc)
+        metrics["best_val_acc"] = test_acc
+    if defaults.task == TaskType.REGRESSION:
+        target_vals: np.ndarray = (
+            data_df[defaults.target_table][split == "test"]
+            .to_pandas()[defaults.target_column]
+            .apply(float)
+            .to_numpy()
+        )
+        val_nrmse = (
+            np.sqrt(((y_pred.squeeze() - target_vals) ** 2).mean()) / target_vals.mean()
+        )
+        print("val_nrmse:", val_nrmse)
+        metrics["best_val_nrmse"] = val_nrmse
+
+    return metrics
+
+
+def run_experiment(
+    tracking_uri: str,
+    experiment_name: str,
+    dataset: CTUDatasetName,
+    run_name: str = None,
+    log_dir: str = None,
+    random_seed: int = RANDOM_SEED,
+):
+    random.seed(random_seed)
+    np.random.seed(random_seed)
+    torch.manual_seed(random_seed)
+
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(experiment_name=experiment_name)
+
+    # getml_dir = f"./datasets/.getml"
+    # Path(getml_dir).mkdir(parents=True, exist_ok=True)
+
+    getml.engine.launch(
+        launch_browser=False,
+        project_directory=f"./datasets/{dataset}",
+        allow_remote_ips=True,
+    )
+    getml.engine.set_project(dataset)
+
+    time_str = datetime.now().strftime("%d-%m-%Y,%H:%M:%S")
+    run_name = f"{dataset}_{time_str}" if run_name is None else run_name
+
+    with mlflow.start_run(run_name=run_name) as parent_run:
+        mlflow.set_tags(
+            {
+                MLFLOW_USER: "pelesjak",
+                "Dataset": dataset,
+            }
+        )
+        client = mlflow.tracking.MlflowClient(tracking_uri)
+
+        for depth in range(2, 6):
+            run = client.create_run(
+                parent_run.info.experiment_id,
+                run_name=f"{run_name}_{depth}",
+                tags={
+                    MLFLOW_USER: "pelesjak",
+                    MLFLOW_PARENT_RUN_ID: parent_run.info.run_id,
+                    "Dataset": dataset,
+                },
+            )
+            client.log_param(run.info.run_id, "dataset", dataset)
+            client.log_param(run.info.run_id, "max_depth", depth)
+
+            try:
+                metrics = main(dataset, depth)
+
+                for m, v in metrics.items():
+                    client.log_metric(run.info.run_id, m, v)
+                mlflow.log_metrics({k: v for (k, v) in metrics.items()})
+                break
+            except Exception as e:
+                print(traceback.format_exc())
+                client.set_tag(run.info.run_id, "exception", str(e))
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(add_option_string_dash_variants=DashVariant.DASH)
-    parser.add_argument("dataset", choices=t_get_args(FITDatasetName))
-    parser.add_arguments(ModelConfig, dest="model_config")
-    parser.add_arguments(DataConfig, dest="data_config")
-    parser.add_argument("--mlflow", action=argparse.BooleanOptionalAction, default=False)
-    args = parser.parse_args([DEFAULT_DATASET_NAME, "--depths", "4"])
-    model_config: ModelConfig = args.model_config
-    data_config: DataConfig = args.data_config
-    dataset_name: FITDatasetName = args.dataset
-    do_mlflow: bool = args.mlflow
-
-    def _run_main():
-        main(dataset_name, data_config, model_config)
-
-    dataset_idx = sorted(FIT_DATASET_DEFAULTS).index(dataset_name)
-    getml.communication.port.value = 11111 + dataset_idx
-    getml.communication.tcp_port.value = 12111 + dataset_idx
-
-    getml.engine.launch(
-        launch_browser=True,
-        project_directory="/mnt/personal/neumaja5/getml-internal-data/",
-        http_port=getml.communication.port.value,
-        tcp_port=getml.communication.tcp_port.value,
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=DEFAULT_DATASET_NAME,
+        choices=get_args(CTUDatasetName),
     )
-    getml.engine.set_project(dataset_name)
+    parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
+    parser.add_argument("--run_name", type=str, default=None)
+    parser.add_argument("--log_dir", type=str, default=None)
 
-    if do_mlflow:
-        os.environ["MLFLOW_TRACKING_URI"] = "http://147.32.83.171:2222"
-        mlflow.set_experiment("deep_rl_learning NEW - neumaja5")
-        mlflow.pytorch.autolog()
+    args = parser.parse_args()
+    print(args)
 
-        file_name = os.path.basename(__file__)
-        with mlflow.start_run(
-            run_name=f"{file_name} - {dataset_name} - {uuid.uuid4()}"
-        ) as run:
-            mlflow.set_tag("dataset", dataset_name)
-            mlflow.set_tag("Model Source", file_name)
-
-            for k, v in asdict(model_config).items():
-                mlflow.log_param(k, v)
-
-            for k, v in asdict(data_config).items():
-                mlflow.log_param(k, v)
-
-            try:
-                _run_main()
-            except Exception as ex:
-                mlflow.set_tag("exception", str(ex))
-                raise ex
-            finally:
-                getml.engine.shutdown()
-    else:
-        try:
-            _run_main()
-        finally:
-            getml.engine.shutdown()
+    run_experiment(
+        "http://147.32.83.171:2222",
+        args.experiment,
+        args.dataset,
+        args.run_name,
+        args.log_dir,
+    )

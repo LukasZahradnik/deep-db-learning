@@ -1,43 +1,50 @@
 import argparse
 import collections
-import os
+from datetime import datetime
+import os, sys
+import traceback
+
+sys.path.append(os.getcwd())
+
 import random
 import uuid
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable, Literal, get_args
 from typing import get_args as t_get_args
 
-import lovely_tensors as lt
 import mlflow
+from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
+
 import numpy as np
 import pandas as pd
 import srlearn.base as srlearn_base
 import torch
 import torch_geometric.transforms as T
-from db_transformer.data.dataset_defaults.fit_dataset_defaults import (
-    FITDatasetName,
-    FIT_DATASET_DEFAULTS,
+from db_transformer.data import (
+    CTUDatasetName,
+    CTUDataset,
 )
-from db_transformer.data.fit_dataset import FITRelationalDataset
-from db_transformer.data.utils.heterodata_builder import HeteroDataBuilder
 from db_transformer.schema.columns import CategoricalColumnDef
 from db_transformer.schema.schema import ForeignKeyDef, Schema
 from slugify import slugify
 from srlearn import Background
 from srlearn.base import FileSystem
 from srlearn.database import Database
-from srlearn.rdn import BoostedRDNClassifier
+from srlearn.rdn import BoostedRDNClassifier, BoostedRDNRegressor
 from srlearn.system_manager import BoostSRLFiles
 from tqdm.auto import tqdm
 
-lt.monkey_patch()
 
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
 
 
-DEFAULT_DATASET_NAME: FITDatasetName = "NBA"
+DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
+
+DEFAULT_EXPERIMENT_NAME = "pelesjak-deep-db-tests"
+
+RANDOM_SEED = 42
 
 
 def _sanitize_value(value) -> str:
@@ -288,10 +295,10 @@ class CustomFileSystem(FileSystem):
         jar_root = Path(srlearn_base.__file__).parent
 
         # Allocate a location where data can safely be stored.
-        data = Path("../neumaja5_examples") / FileSystem.boostsrl_data_directory
+        data = Path(f"./datasets/{dataset_name}") / FileSystem.boostsrl_data_directory
         data.mkdir(exist_ok=True)
 
-        dataset_dir = data / dataset_name
+        dataset_dir = data / "dataset"
         dataset_dir.mkdir(exist_ok=True)
 
         directory = dataset_dir / slugify(str(target_value))
@@ -313,28 +320,16 @@ def wrap_class_with_custom_file_system(cls, dataset_name: str, target_value: str
 
 
 def run(dataset_name: str) -> dict[str, Any]:
-    with FITRelationalDataset.create_remote_connection(dataset_name) as conn:
-        defaults = FIT_DATASET_DEFAULTS[dataset_name]
+    dataset = CTUDataset(dataset_name)
 
-        schema = FITRelationalDataset.create_schema_analyzer(
-            dataset_name, conn, verbose=True
-        ).guess_schema()
+    schema = dataset.schema
+    defaults = dataset.defaults
 
-        builder = HeteroDataBuilder(
-            conn,
-            schema,
-            target_table=defaults.target_table,
-            target_column=defaults.target_column,
-            separate_target=True,
-            create_reverse_edges=True,
-            fillna_with=0.0,
-        )
+    dfs = {n: t.df for n, t in dataset.db.table_dict.items()}
+    data, _ = dataset.build_hetero_data()
 
-        dfs = builder._get_dataframes_raw()
-        data, _ = builder.build(with_column_names=False)
-
-        n_total = data[defaults.target_table].x.shape[0]
-        T.RandomNodeSplit("train_rest", num_val=int(0.30 * n_total), num_test=0)(data)
+    n_total = data[defaults.target_table].y.shape[0]
+    data = T.RandomNodeSplit("train_rest", num_val=int(0.30 * n_total), num_test=0)(data)
 
     target = (defaults.target_table, defaults.target_column)
     train_mask = data[defaults.target_table].train_mask.numpy()
@@ -454,32 +449,60 @@ def run(dataset_name: str) -> dict[str, Any]:
     return result
 
 
+def run_experiment(
+    tracking_uri: str,
+    experiment_name: str,
+    dataset: CTUDatasetName,
+    run_name: str = None,
+    log_dir: str = None,
+    random_seed: int = RANDOM_SEED,
+):
+    random.seed(random_seed)
+    np.random.seed(random_seed)
+    torch.manual_seed(random_seed)
+
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(experiment_name=experiment_name)
+
+    time_str = datetime.now().strftime("%d-%m-%Y,%H:%M:%S")
+    run_name = f"{dataset}_{time_str}" if run_name is None else run_name
+
+    with mlflow.start_run(run_name=run_name) as parent_run:
+        mlflow.set_tags(
+            {
+                MLFLOW_USER: "pelesjak",
+                "Dataset": dataset,
+            }
+        )
+        mlflow.log_params(dict(dataset=dataset))
+
+        try:
+            metrics = run(dataset)
+            mlflow.log_metrics(metrics)
+        except Exception as e:
+            print(traceback.format_exc())
+            mlflow.set_tag("exception", str(e))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("dataset", choices=t_get_args(FITDatasetName))
-    parser.add_argument("--mlflow", action=argparse.BooleanOptionalAction, default=False)
-    args = parser.parse_args([DEFAULT_DATASET_NAME] if "__file__" not in locals() else None)
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=DEFAULT_DATASET_NAME,
+        choices=get_args(CTUDatasetName),
+    )
+    parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
+    parser.add_argument("--run_name", type=str, default=None)
+    parser.add_argument("--log_dir", type=str, default=None)
 
-    dataset_name: FITDatasetName = args.dataset
-    do_mlflow: bool = args.mlflow
+    args = parser.parse_args()
+    print(args)
 
-    if do_mlflow:
-        os.environ["MLFLOW_TRACKING_URI"] = "http://147.32.83.171:2222"
-        mlflow.set_experiment("deep_rl_learning NEW - neumaja5")
-        mlflow.pytorch.autolog()
-
-        file_name = os.path.basename(__file__)
-        with mlflow.start_run(run_name=f"{file_name} - {dataset_name} - {uuid.uuid4()}"):
-            mlflow.set_tag("dataset", dataset_name)
-            mlflow.set_tag("Model Source", file_name)
-
-            try:
-                result = run(dataset_name)
-            except Exception as ex:
-                mlflow.set_tag("exception", str(ex))
-                raise ex
-
-            for k, v in result.items():
-                mlflow.log_metric(k, v)
-    else:
-        run(dataset_name)
+    run_experiment(
+        "http://147.32.83.171:2222",
+        args.experiment,
+        args.dataset,
+        args.run_name,
+        args.log_dir,
+    )
