@@ -26,6 +26,8 @@ df_data: Dict[str, List[Any]] = dict(
     total_n_edges=[],
     total_ratio_edges_tuples=[],
     task=[],
+    has_text=[],
+    has_time=[],
 )
 for dataset_name in CTU_REPOSITORY_DEFAULTS:
     try:
@@ -38,6 +40,14 @@ for dataset_name in CTU_REPOSITORY_DEFAULTS:
         target = dataset.defaults.target
 
         tf_dict: Dict[NodeType, torch_frame.TensorFrame] = data.collect("tf")
+        has_text = False
+        has_time = False
+        for tf in tf_dict.values():
+            if torch_frame.stype.embedding in tf.stypes:
+                has_text = True
+            if torch_frame.stype.timestamp in tf.stypes:
+                has_time = True
+
         edge_dict: Dict[EdgeType, torch_geometric.EdgeIndex] = data.collect("edge_index")
         target_table: torch_frame.TensorFrame = data[target[0]].tf
 
@@ -56,25 +66,26 @@ for dataset_name in CTU_REPOSITORY_DEFAULTS:
             df_data["total_n_edges"][-1] / df_data["total_n_tuples"][-1]
         )
         df_data["task"].append(dataset.defaults.task.to_type())
+        df_data["has_text"].append(has_text)
+        df_data["has_time"].append(has_time)
     except Exception as e:
         print(f"Error processing {dataset_name}: {e}")
 
 df = pd.DataFrame(df_data)
 
+df["size"] = ""
+df.loc[df["n_target_tuples"].between(0, 1000), "size"] = 0
+df.loc[df["n_target_tuples"].between(1001, 10000), "size"] = 1
+df.loc[df["n_target_tuples"].between(10001, 100000), "size"] = 2
+df.loc[df["n_target_tuples"].between(100001, 1000000), "size"] = 3
+df.loc[df["n_target_tuples"].between(1000001, 10000000), "size"] = 4
+
 print(df)
 
 df.to_csv("./datasets/info.csv", index=False)
 
-df["size"] = ""
-df.loc[df["n_target_tuples"].between(0, 1000), "size"] = "0-1000"
-df.loc[df["n_target_tuples"].between(1001, 10000), "size"] = "1001-10000"
-df.loc[df["n_target_tuples"].between(10001, 100000), "size"] = "10001-100000"
-df.loc[df["n_target_tuples"].between(100001, 1000000), "size"] = "100001-1000000"
-df.loc[df["n_target_tuples"].between(1000001, 10000000), "size"] = "1000001-10000000"
-
-
-print("tiny:", df.loc[df["size"] == "0-1000"]["dataset"].values)
-print("small:", df.loc[df["size"] == "1001-10000"]["dataset"].values)
-print("medium:", df.loc[df["size"] == "10001-100000"]["dataset"].values)
-print("big:", df.loc[df["size"] == "100001-1000000"]["dataset"].values)
-print("giant:", df.loc[df["size"] == "1000001-10000000"]["dataset"].values)
+print("tiny:", df.loc[df["size"] == 0]["dataset"].values)
+print("small:", df.loc[df["size"] == 1]["dataset"].values)
+print("medium:", df.loc[df["size"] == 2]["dataset"].values)
+print("big:", df.loc[df["size"] == 3]["dataset"].values)
+print("giant:", df.loc[df["size"] == 4]["dataset"].values)

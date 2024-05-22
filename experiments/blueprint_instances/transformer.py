@@ -36,6 +36,7 @@ def create_transformer_model(
     mlp_dims = config.get("mlp_dims", [])
     num_heads = config.get("num_heads", 1)
     batch_norm = config.get("batch_norm", False)
+    positional = config.get("positional", False)
     dropout = config.get("dropout", 0)
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
@@ -53,7 +54,7 @@ def create_transformer_model(
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
         stype_encoder_dict=get_encoder(encoder),
-        positional_encoding=False,
+        positional_encoding=positional,
         num_gnn_layers=gnn_layers,
         pre_combination=lambda i, node, cols: Sequential(
             "x_in",

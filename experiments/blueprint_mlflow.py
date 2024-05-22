@@ -246,16 +246,20 @@ def get_tune_config(
             "mlp_dims": tune.choice([[], [64], [64, 64]]),
             "batch_norm": tune.choice([True, False]),
         }
-    # TODO: re-do
     if model_type == "transformer":
         return {
             "embed_dim": tune.choice([16, 32, 64]),
-            "aggr": tune.choice(["attn", "sum"]),
+            "aggr": "attn",
             "gnn_layers": tune.randint(1, 5),
             "mlp_dims": tune.choice([[], [64], [64, 64]]),
             "batch_norm": tune.choice([True, False]),
             "num_heads": tune.choice([1, 4, 8]),
             "dropout": tune.choice([0.0, 0.2]),
+            "positional": False,
+            # "positional": True,
+            "encoder": "basic",
+            # "encoder": "with_embeddings",
+            # "encoder": "with_time",
         }
     if model_type == "saint":
         return {

@@ -5,11 +5,11 @@ conda_env="deep-db-learning"
 source "$(conda info --base)""/etc/profile.d/conda.sh"
 conda activate "$conda_env"
 
-run_timeout=$(expr 60 \* 60 \* 24) # 24 hours
+run_timeout=$(expr 60 \* 60 \* 3 ) # 3 hours
 
 MODEL_TYPE=$1
 if [[ -z "$MODEL_TYPE" ]]; then
-    MODEL_TYPE="getml_xgboost"
+    MODEL_TYPE="getml_cilp"
 fi
 
 EXPERIMENT_ID="all_datasets_${MODEL_TYPE}_$(date '+%d-%m-%Y_%H:%M:%S')"
@@ -28,10 +28,10 @@ invalid_datasets=(
 )
 
 ALL_DATASETS=(
-    # 'Bupa' 'Carcinogenesis' 'Chess' 'CraftBeer'
-    # 'Dallas' 'Dunur' 'financial' 'genes' 'Hepatitis_std' 'Mesh'
-    # 'Mondial' 'medical' 'MuskSmall' 'mutagenesis' 'NCAA'
-    # 'Pima' 
+    'Bupa' 'Carcinogenesis' 'Chess' 'CraftBeer'
+    'Dallas' 'Dunur' 'financial' 'genes' 'Hepatitis_std' 'Mesh'
+    'Mondial' 'medical' 'MuskSmall' 'mutagenesis' 'NCAA'
+    'Pima' 
     'PremierLeague' 'PTE' 'Student_loan' 'Toxicology'
     'UW_std' 'WebKP'
 
@@ -60,25 +60,24 @@ mkdir logs/${EXPERIMENT_ID}
 
 # Stop after given timeout
 function timeout_monitor() {
-    echo "Run with stop in ${run_timeout}s"
+    echo "Run $2 with stop in ${run_timeout}s"
     sleep "$run_timeout"
-    python -c """
-    import getml
-    getml.engine.shutdown()
-    """
+    kill $1
 }
 
-timeout_monitor &
-timeout_monitor_pid=$!
-
+run_pid=""
 # Run experiment on different datasets
 for dataset in ${ALL_DATASETS[@]}; do
     mkdir logs/${EXPERIMENT_ID}/${dataset}
-    python -u experiments/getml_xgboost.py --dataset=${dataset} \
+    python -u experiments/getml_cilp.py --dataset=${dataset} \
     --experiment=pelesjak-deep-db-experiments-v2 --log_dir=logs/${EXPERIMENT_ID}/${dataset} \
-    --run_name=${EXPERIMENT_ID}_${dataset} &> "logs/${EXPERIMENT_ID}/${dataset}/run.log"
+    --run_name=${EXPERIMENT_ID}_${dataset} &> "logs/${EXPERIMENT_ID}/${dataset}/run.log" &
+    run_pid=$!
+    timeout_monitor $run_pid $dataset &
+    timeout_monitor_pid=$!
+    wait $run_pid
+    kill $timeout_monitor_pid
 done
-
 
 echo "All runs finished!"
 
