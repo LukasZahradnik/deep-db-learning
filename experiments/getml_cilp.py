@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import traceback
 import os, sys
@@ -9,18 +9,27 @@ import random
 import uuid
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from typing import Callable, Literal, Optional, TypeVar, get_args
+from typing import Callable, Dict, List, Literal, Optional, Tuple, TypeVar, get_args
 from typing import get_args as t_get_args
 
 import getml
+from getml.feature_learning import loss_functions
+
+
 import mlflow
-from mlflow.entities import Param
+from mlflow.entities import Param, Metric
 from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 
 import numpy as np
 import pandas as pd
 import torch
+from torch.utils.data import TensorDataset, DataLoader
+import lightning as L
+
 import torch_geometric.transforms as T
+
+from torch_frame.data import StatType
+
 from db_transformer.data import (
     CTUDataset,
     CTUDatasetName,
@@ -39,8 +48,6 @@ from db_transformer.schema.columns import (
     TimeColumnDef,
 )
 from db_transformer.schema.schema import ForeignKeyDef, Schema
-from getml.feature_learning import loss_functions
-from sqlalchemy.engine import Connection
 
 random.seed(0)
 np.random.seed(0)
@@ -364,36 +371,202 @@ def build_getml_datamodel(
     return dm
 
 
-def strip_targets_prefix(targets: list[str], target_column: str) -> list[str]:
-    out: list[str] = []
+class BestMetricsLoggerCallback(L.Callback):
+    def __init__(
+        self,
+        monitor: str = "val_acc",
+        cmp: Literal["min", "max"] = "max",
+        metrics: Optional[Dict[str, str]] = None,
+        verbose: bool = True,
+    ) -> None:
+        if metrics is None:
+            # fmt:off
+            metrics = [
+                "train_acc", "val_acc", "test_acc", "train_err", "val_err", "test_err",
+                "train_loss", "val_loss", "test_loss"
+            ]
+            # fmt:on
 
-    prefix = f"{target_column}="
+        self.monitor = monitor
+        self.cmp = cmp
+        self.metrics = metrics
+        self.best_value: Optional[float] = None
+        self.verbose = verbose
 
-    for t in targets:
-        if t.startswith(prefix):
-            t = t[len(prefix) :]
-        out.append(t)
-    return out
+    def on_validation_epoch_end(
+        self, trainer: L.Trainer, pl_module: L.LightningModule
+    ) -> None:
+        if self.monitor not in trainer.callback_metrics:
+            return
+
+        mon_value = trainer.callback_metrics[self.monitor].detach().cpu().item()
+
+        if self.best_value is not None and (
+            self.cmp == "min" and mon_value >= self.best_value
+        ):
+            return
+
+        if self.best_value is not None and (
+            self.cmp == "max" and mon_value <= self.best_value
+        ):
+            return
+
+        self.best_value = mon_value
+        metric_dict = {}
+        for metric_name in self.metrics:
+            if metric_name not in trainer.callback_metrics:
+                continue
+            metric_dict[f"best_{metric_name}"] = (
+                trainer.callback_metrics[metric_name].detach().cpu().item()
+            )
+
+        pl_module.log_dict(metric_dict, prog_bar=self.verbose)
 
 
-def evaluate_accuracy(
-    targets: list[str], target_column: str, y_pred_prob: np.ndarray, y_true: pd.Series
-) -> float:
-    targets = strip_targets_prefix(targets, target_column)
-    targets_idx_map = {v: i for i, v in enumerate(targets)}
-    y_pred = np.argmax(y_pred_prob, 1)
-    if y_true.apply(type).eq(str).all():
-        y_true_np = y_true.map(targets_idx_map).to_numpy()
-    else:
-        y_true_np = y_true
-    print(list(y_pred), y_pred.shape)
-    print(list(y_true_np), y_true_np.shape)
-    return np.mean(y_pred == y_true_np)
+class MLFlowLoggerCallback(L.Callback):
+    def __init__(
+        self,
+        run_id: str,
+        mlflow_client: mlflow.MlflowClient,
+        metrics: Optional[List[str]] = None,
+    ) -> None:
+
+        self.run_id = run_id
+        self.mlflow_client = mlflow_client
+
+        if metrics is None:
+            # fmt:off
+            metrics = [
+                "train_acc", "best_train_acc", "val_acc", "best_val_acc", "test_acc",
+                "best_test_acc", "train_loss", "best_train_loss", "val_loss", 
+                "best_val_loss", "test_loss", "best_test_loss", "train_err", 
+                "best_train_err", "val_err", "best_val_err", "test_err", "best_test_err",
+            ]
+            # fmt:on
+        self.metrics = metrics
+
+    def on_validation_epoch_end(
+        self, trainer: L.Trainer, pl_module: L.LightningModule
+    ) -> None:
+        metric_dict = {}
+        mlflow_metrics = []
+        timestamp = int(datetime.now().timestamp() * 1000)
+
+        for metric_name in self.metrics:
+            if metric_name not in trainer.callback_metrics:
+                continue
+            metric_dict[metric_name] = (
+                trainer.callback_metrics[metric_name].detach().cpu().item()
+            )
+            mlflow_metrics.append(
+                Metric(
+                    metric_name, metric_dict[metric_name], timestamp, trainer.current_epoch
+                )
+            )
+
+        self.mlflow_client.log_batch(self.run_id, metrics=mlflow_metrics, synchronous=False)
 
 
-def main(dataset_name: str, max_depth: int):
+class LightningWrapper(L.LightningModule):
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        lr: float = 0.0001,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        loss_module: Optional[torch.nn.Module] = None,
+        metrics: Optional[Dict[str, torch.nn.Module]] = None,
+        task_type: TaskType = TaskType.CLASSIFICATION,
+        verbose: bool = True,
+    ) -> None:
+        super().__init__()
+        self.model = model
+        self.lr = lr
+        self.betas = betas
+        self.task_type = task_type
+        self.verbose = verbose
+
+        if loss_module is None:
+            if task_type == TaskType.CLASSIFICATION:
+                loss_module = torch.nn.CrossEntropyLoss(reduction="mean")
+            else:
+                loss_module = torch.nn.MSELoss(reduction="mean")
+
+        if metrics is None:
+            metrics = {}
+            if task_type == TaskType.CLASSIFICATION:
+                metrics["acc"] = (
+                    lambda out, target: (out.argmax(dim=-1) == target)
+                    .type(torch.float)
+                    .mean()
+                )
+            if task_type == TaskType.REGRESSION:
+                metrics["mae"] = torch.nn.L1Loss(reduction="mean")
+                metrics["mse"] = torch.nn.MSELoss(reduction="mean")
+                metrics["nrmse"] = (
+                    lambda out, target: torch.sqrt(
+                        torch.nn.functional.mse_loss(out, target, reduction="mean")
+                    )
+                    / target.mean()
+                )
+
+        self.loss_module = loss_module
+        self.metrics = metrics
+
+    def forward(self, data: Tuple[torch.Tensor, torch.Tensor], mode: str = "train"):
+
+        out: torch.Tensor = self.model(data[0])
+        out = out.squeeze(dim=-1)
+
+        target: torch.Tensor = data[1]
+
+        loss = self.loss_module(out, target)
+
+        batch_size = target.shape[0]
+        self.log(
+            f"{mode}_loss",
+            loss,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=self.verbose,
+        )
+
+        metric_dict = {
+            f"{mode}_{name}": metric(out, target) for name, metric in self.metrics.items()
+        }
+        self.log_dict(
+            metric_dict,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=self.verbose,
+        )
+
+        return loss
+
+    def configure_optimizers(self):
+        self.opt = torch.optim.Adam(self.parameters(), lr=self.lr, betas=self.betas)
+        return {"optimizer": self.opt}
+
+    def training_step(self, batch):
+        loss = self.forward(batch, "train")
+        return loss
+
+    def validation_step(self, batch):
+        self.forward(batch, "val")
+
+    def test_step(self, batch):
+        self.forward(batch, "test")
+
+
+def main(
+    run_id: str,
+    client: mlflow.MlflowClient,
+    dataset_name: str,
+    max_depth: int,
+):
     dataset = CTUDataset(dataset_name, data_dir="./datasets")
-    data, _ = dataset.build_hetero_data()
+    data, col_stats_dict = dataset.build_hetero_data()
 
     defaults = dataset.defaults
     schema = dataset.schema
@@ -405,11 +578,6 @@ def main(dataset_name: str, max_depth: int):
         {n: t.df for n, t in dataset.db.table_dict.items()}, schema, defaults
     )
 
-    # for tname, tbl in data_df.items():
-    #     print(tname, tbl)
-
-    # build split
-    # split = getml.data.split.random(train=0.7, test=0.3)  # TODO use universal split
     split = pd.Series(data[defaults.target_table].train_mask.numpy())
     split = split.map({True: "train", False: "test"}).to_frame("split")
     split = getml.data.DataFrame.from_pandas(split, "split")["split"]
@@ -427,13 +595,11 @@ def main(dataset_name: str, max_depth: int):
     mapping = getml.preprocessors.Mapping()
 
     if defaults.task == TaskType.CLASSIFICATION:
-        predictor = getml.predictors.XGBoostClassifier()
         fast_prop = getml.feature_learning.FastProp(
             loss_function=loss_functions.CrossEntropyLoss,
         )
 
     elif defaults.task == TaskType.REGRESSION:
-        predictor = getml.predictors.XGBoostRegressor()
         fast_prop = getml.feature_learning.FastProp(
             loss_function=loss_functions.SquareLoss,
         )
@@ -444,71 +610,124 @@ def main(dataset_name: str, max_depth: int):
         data_model=dm,
         preprocessors=[mapping],
         feature_learners=[fast_prop],
-        # feature_selectors=[feature_selector],
-        predictors=[predictor],
         share_selected_features=0.5,
+        include_categorical=True,
     )
 
     pipe = pipe.fit(container.train)
-    y_pred = pipe.predict(container.train)
-    assert y_pred is not None
 
-    # print(pipe.score(container.train))
+    target = dataset.defaults.target
 
-    metrics = {}
-    if defaults.task == TaskType.CLASSIFICATION:
-        train_acc = evaluate_accuracy(
-            pipe.targets,
-            defaults.target_column,
-            y_pred,
-            data_df[defaults.target_table][split == "train"].to_pandas()[
-                defaults.target_column
-            ],
-        )
-        print("train_acc:", train_acc)
-        metrics["best_train_acc"] = train_acc
-    if defaults.task == TaskType.REGRESSION:
-        target_vals: np.ndarray = (
-            data_df[defaults.target_table][split == "train"]
-            .to_pandas()[defaults.target_column]
-            .apply(float)
-            .to_numpy()
-        )
-        train_nrmse = (
-            np.sqrt(((y_pred.squeeze() - target_vals) ** 2).mean()) / target_vals.mean()
-        )
-        print("train_nrmse:", train_nrmse)
-        metrics["best_train_nrmse"] = train_nrmse
+    target_node = data[target[0]]
 
-    y_pred = pipe.predict(container.test)
+    total_samples = target_node.y.shape[0]
 
-    # print(pipe.score(container.test))
+    min_batch_size = max(16, int(2 ** np.around(np.log2(total_samples / 100))))
+    batch_size = min(min_batch_size * 2**3, 16384)
 
-    if defaults.task == TaskType.CLASSIFICATION:
-        test_acc = evaluate_accuracy(
-            pipe.targets,
-            defaults.target_column,
-            y_pred,
-            data_df[defaults.target_table][split == "test"].to_pandas()[
-                defaults.target_column
-            ],
-        )
-        print("test_acc:", test_acc)
-        metrics["best_val_acc"] = test_acc
-    if defaults.task == TaskType.REGRESSION:
-        target_vals: np.ndarray = (
-            data_df[defaults.target_table][split == "test"]
-            .to_pandas()[defaults.target_column]
-            .apply(float)
-            .to_numpy()
-        )
-        val_nrmse = (
-            np.sqrt(((y_pred.squeeze() - target_vals) ** 2).mean()) / target_vals.mean()
-        )
-        print("val_nrmse:", val_nrmse)
-        metrics["best_val_nrmse"] = val_nrmse
+    train_x = torch.Tensor(pipe.transform(container.train))
+    if train_x.shape[0] == 0:
+        return {}
+    val_x = torch.Tensor(pipe.transform(container.test))
 
-    return metrics
+    train_y = torch.masked_select(target_node.y, target_node.train_mask)
+    val_y = torch.masked_select(target_node.y, target_node.val_mask)
+
+    train_dataset = TensorDataset(train_x, train_y)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    val_dataset = TensorDataset(val_x, val_y)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+
+    def get_mlp(
+        input_dim: int,
+        output_dim: int,
+        mlp_dims: List[int] = [],
+        batch_norm: bool = False,
+        layer_activation: type[torch.nn.Module] = torch.nn.ReLU,
+        out_activation: Optional[torch.nn.Module] = None,
+    ):
+
+        mlp_dims = [input_dim, *mlp_dims, output_dim]
+
+        mlp_layers = []
+        for i in range(len(mlp_dims) - 1):
+            if i > 0:
+                if batch_norm:
+                    mlp_layers.append(torch.nn.BatchNorm1d(mlp_dims[i]))
+                mlp_layers.append(layer_activation())
+            mlp_layers.append(torch.nn.Linear(mlp_dims[i], mlp_dims[i + 1]))
+
+        if out_activation is not None:
+            mlp_layers.append(out_activation)
+
+        return torch.nn.Sequential(*mlp_layers)
+
+    is_classification = defaults.task == TaskType.CLASSIFICATION
+    output_dim = (
+        len(col_stats_dict[target[0]][target[1]][StatType.COUNT][0])
+        if is_classification
+        else 1
+    )
+
+    model = get_mlp(
+        train_x.shape[1],
+        output_dim,
+        [64, 64],
+        batch_norm=True,
+        out_activation=torch.nn.Softmax(dim=-1) if is_classification else None,
+    )
+
+    lightning_model = LightningWrapper(
+        model, task_type=dataset.defaults.task, verbose=False
+    )
+
+    metric = "acc" if is_classification else "nrmse"
+
+    metrics_list = [
+        "train_loss",
+        "best_train_loss",
+        "val_loss",
+        "best_val_loss",
+        f"train_{metric}",
+        f"best_train_{metric}",
+        f"val_{metric}",
+        f"best_val_{metric}",
+    ]
+
+    trainer = L.Trainer(
+        accelerator="cpu",
+        devices=1,
+        deterministic=True,
+        callbacks=[
+            BestMetricsLoggerCallback(
+                monitor=f"val_{metric}",
+                cmp="max" if metric == "acc" else "min",
+                metrics=[
+                    "train_loss",
+                    "val_loss",
+                    f"train_{metric}",
+                    f"val_{metric}",
+                ],
+            ),
+            MLFlowLoggerCallback(
+                run_id,
+                client,
+                metrics=metrics_list,
+            ),
+        ],
+        max_time=timedelta(hours=1),
+        max_epochs=2000,
+        min_epochs=2,
+        max_steps=2000 * 2,
+        enable_checkpointing=False,
+        logger=False,
+    )
+
+    trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
+    client.set_terminated(run_id)
+
+    return {m: trainer.callback_metrics.get(m, None) for m in metrics_list}
 
 
 def run_experiment(
@@ -562,11 +781,8 @@ def run_experiment(
             client.log_param(run.info.run_id, "max_depth", depth)
 
             try:
-                metrics = main(dataset, depth)
-
-                for m, v in metrics.items():
-                    client.log_metric(run.info.run_id, m, v)
-                mlflow.log_metrics({k: v for (k, v) in metrics.items()})
+                metrics = main(run.info.run_id, client, dataset, depth)
+                mlflow.log_metrics({k: v for (k, v) in metrics.items() if v is not None})
                 break
             except Exception as e:
                 print(traceback.format_exc())

@@ -59,7 +59,7 @@ class FITRelationalDataset(DBDataset):
     def get_url(cls, dataset: str) -> str:
         connector = "mariadb+mysqlconnector"
         port = 3306
-        return f"{connector}://guest:ctu-relational@78.128.250.186:{port}/{dataset}"
+        return f"{connector}://guest:ctu-relational@relational.fel.cvut.cz:{port}/{dataset}"
 
     @classmethod
     def create_remote_connection(cls, dataset: str):

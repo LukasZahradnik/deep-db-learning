@@ -27,8 +27,8 @@ from db_transformer.data.dataset_defaults.fit_dataset_defaults import (
     FITDatasetDefaults,
     TaskType,
 )
-from db_transformer.data.embedder import CatEmbedder, NumEmbedder
-from db_transformer.data.embedder.embedders import TableEmbedder
+
+from db_transformer.nn.embedder import MultiTableEmbedder, CatEmbedder, NumEmbedder
 from db_transformer.data.fit_dataset import FITRelationalDataset
 from db_transformer.data.utils import HeteroDataBuilder
 from db_transformer.helpers.timer import Timer
@@ -81,7 +81,7 @@ class Model(torch.nn.Module):
 
         node_types = list(column_defs.keys())
 
-        self.embedder = TableEmbedder(
+        self.embedder = MultiTableEmbedder(
             (CategoricalColumnDef, lambda: CatEmbedder(dim=config.dim)),
             (NumericColumnDef, lambda: NumEmbedder(dim=config.dim)),
             dim=config.dim,

@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.nn import HeteroConv, Linear, MessagePassing
 
-from db_transformer.data.embedder import TableEmbedder, NumEmbedder, CatEmbedder
+from db_transformer.nn.embedder import MultiTableEmbedder, NumEmbedder, CatEmbedder
 from db_transformer.schema import NumericColumnDef, CategoricalColumnDef
 
 
@@ -85,7 +85,7 @@ class DBTransformer(torch.nn.Module):
 
         self.target_table = target_table
         self.schema = schema
-        self.embedder = TableEmbedder(
+        self.embedder = MultiTableEmbedder(
             (CategoricalColumnDef, lambda: CatEmbedder(dim=config.dim)),
             (NumericColumnDef, lambda: NumEmbedder(dim=config.dim)),
             dim=config.dim,
