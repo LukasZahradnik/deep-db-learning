@@ -33,6 +33,7 @@ def create_tabtransformer_model(
     gnn_layers = config.get("gnn_layers", 1)
     mlp_dims = config.get("mlp_dims", [])
     num_heads = config.get("num_heads", 1)
+    num_layers = config.get("num_layers", 1)
     batch_norm = config.get("batch_norm", False)
     dropout = config.get("dropout", 0)
 
@@ -48,6 +49,29 @@ def create_tabtransformer_model(
         num_num_cols = len(col_names_dict[node].get(stype.numerical, []))
         return lambda x: (x[:, :num_num_cols], x[:, num_num_cols:])
 
+    def get_transformer_block():
+        layers = []
+        for _ in range(num_layers):
+            layers.extend(
+                [
+                    (
+                        SelfAttention(embed_dim, num_heads, dropout=dropout),
+                        "x_in -> x_next",
+                    ),
+                    (ResidualNorm(embed_dim), "x_in, x_next -> x_in"),
+                    (
+                        torch.nn.Sequential(
+                            torch.nn.Linear(embed_dim, embed_dim),
+                            torch.nn.ReLU(),
+                            torch.nn.Linear(embed_dim, embed_dim),
+                        ),
+                        "x_in -> x_next",
+                    ),
+                    (ResidualNorm(embed_dim), "x_in, x_next -> x_out"),
+                ]
+            )
+        return layers
+
     return BlueprintModel(
         target=target,
         embed_dim=embed_dim,
@@ -61,20 +85,7 @@ def create_tabtransformer_model(
             "x_in_raw",
             [
                 (get_cat_num_split(node), "x_in_raw -> x_num, x_in"),
-                (
-                    SelfAttention(embed_dim, num_heads, dropout=dropout),
-                    "x_in -> x_next",
-                ),
-                (ResidualNorm(embed_dim), "x_in, x_next -> x_in"),
-                (
-                    torch.nn.Sequential(
-                        torch.nn.Linear(embed_dim, embed_dim),
-                        torch.nn.ReLU(),
-                        torch.nn.Linear(embed_dim, embed_dim),
-                    ),
-                    "x_in -> x_next",
-                ),
-                (ResidualNorm(embed_dim), "x_in, x_next -> x_out"),
+                *get_transformer_block(),
                 (
                     lambda x_num, x_cat: torch.concat([x_num, x_cat], dim=1),
                     "x_num, x_out -> x_out",

@@ -32,9 +32,11 @@ def create_transformer_model(
     embed_dim = config.get("embed_dim", 64)
     encoder = config.get("encoder", "basic")
     gnn_layers = config.get("gnn_layers", 1)
+    aggr = config.get("aggr", "attn")
     mlp_dims = config.get("mlp_dims", [])
     num_heads = config.get("num_heads", 1)
     batch_norm = config.get("batch_norm", False)
+    positional = config.get("positional", False)
     dropout = config.get("dropout", 0)
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
@@ -52,7 +54,7 @@ def create_transformer_model(
         col_names_dict_per_table=col_names_dict,
         edge_types=edge_types,
         stype_encoder_dict=get_encoder(encoder),
-        positional_encoding=False,
+        positional_encoding=positional,
         num_gnn_layers=gnn_layers,
         pre_combination=lambda i, node, cols: Sequential(
             "x_in",
@@ -74,7 +76,7 @@ def create_transformer_model(
             ],
         ),
         table_combination=lambda i, edge, cols: CrossAttentionConv(
-            embed_dim, num_heads=num_heads, dropout=dropout, aggr="attn"
+            embed_dim, num_heads=num_heads, dropout=dropout, aggr=aggr
         ),
         post_combination=lambda i, node, cols: Sequential(
             "x_in, x_next",

@@ -38,7 +38,9 @@ class TromptEncoder(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size = len(x)
         # [batch_size, num_prompts * num_layers, channels]
-        outs = torch.empty(batch_size, self.num_prompts * self.num_layers, self.channels)
+        outs = torch.empty(
+            batch_size, self.num_prompts * self.num_layers, self.channels
+        ).to(x.device)
 
         # [batch_size, num_prompts, channels]
         x_prompt = self.x_prompt.repeat(batch_size, 1, 1)
@@ -65,7 +67,9 @@ class TromptDecoder(torch.nn.Module):
     def forward(self, x_prompts: torch.Tensor) -> torch.Tensor:
         batch_size = len(x_prompts)
         # [batch_size, num_encoder_layers, out_channels]
-        outs = torch.empty(batch_size, self.num_encoder_layers, self.out_channels)
+        outs = torch.empty(batch_size, self.num_encoder_layers, self.out_channels).to(
+            x_prompts.device
+        )
 
         # [batch_size, num_prompts, channels]
         for i, x_prompt in enumerate(x_prompts.split(self.num_prompts, dim=1)):

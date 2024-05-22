@@ -2,9 +2,11 @@ from argparse import ArgumentParser
 from datetime import datetime, timedelta
 import os, sys
 
+os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
+
 sys.path.append(os.getcwd())
 
-from typing import List, Dict, Literal, Union, Optional, Any, Tuple, get_args
+from typing import Literal, get_args
 
 import random
 
@@ -16,20 +18,13 @@ import lightning as L
 from lightning.pytorch import seed_everything
 
 from torch_geometric.data import HeteroData
-from torch_geometric.loader import NeighborLoader
-from torch_geometric.nn import conv, Sequential, summary
+from torch_geometric.loader import NeighborLoader, HGTLoader
 import torch_geometric.transforms as T
-from torch_geometric.typing import EdgeType, NodeType
 
-import torch_frame
-from torch_frame import stype, NAStrategy
-from torch_frame.nn import encoder
-from torch_frame.nn import TabTransformerConv
-from torch_frame.data import StatType
 
 import mlflow
 from mlflow.tracking import MlflowClient
-from mlflow.entities import Run, RunStatus, Param
+from mlflow.entities import Param
 from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 
 import ray
@@ -54,6 +49,8 @@ DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
 DEFAULT_EXPERIMENT_NAME = "pelesjak-deep-db-tests"
 
 RANDOM_SEED = 42
+
+MAX_NEIGHBORS = 50
 
 
 def prepare_run(config: tune.TuneConfig):
@@ -115,56 +112,59 @@ def train_model(config: tune.TuneConfig):
 
         total_samples = data[target[0]].y.shape[0]
 
-        min_batch_size = max(16, int(2 ** np.around(np.log2(total_samples / 100))))
+        min_batch_size = max(16, int(2 ** np.around(np.log2(total_samples / 500))))
         batch_size = min(min_batch_size * 2 ** config["batch_size_scale"], 16384)
         client.log_param(run_id, "batch_size", batch_size)
 
-        num_neighbors = {
-            edge_type: [30] * 5
-            for edge_type in data.collect("edge_index", allow_empty=True).keys()
-        }
-
-        train_loader = NeighborLoader(
+        train_loader = HGTLoader(
             data,
-            num_neighbors=num_neighbors,
+            num_samples=[MAX_NEIGHBORS] * max(2, config.get("gnn_layers", 1)),
             batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].train_mask),
-            subgraph_type="bidirectional",
             shuffle=True,
         )
 
-        val_loader = NeighborLoader(
+        val_loader = HGTLoader(
             data,
-            num_neighbors=num_neighbors,
+            num_samples=[MAX_NEIGHBORS] * max(2, config.get("gnn_layers", 1)),
             batch_size=batch_size,
             input_nodes=(target[0], data[target[0]].val_mask),
-            subgraph_type="bidirectional",
             shuffle=True,
         )
 
         edge_types = list(data.collect("edge_index", allow_empty=True).keys())
 
         model = create_blueprint_model(
-            "honza",
-            dataset.defaults,
-            {
+            config["model_type"],
+            defaults=dataset.defaults,
+            col_names_dict={
                 node: tf.col_names_dict
                 for node, tf in data.collect("tf").items()
                 if tf.num_rows > 0
             },
-            edge_types,
-            col_stats_dict,
-            config,
+            edge_types=edge_types,
+            col_stats_dict=col_stats_dict,
+            config=config,
+        )
+        print(
+            "model_size {:.3f}M".format(
+                sum(p.numel() for p in model.parameters()) / 1_000_000
+            )
+        )
+        client.log_param(
+            run_id,
+            "model_size",
+            "{:.3f}M".format(sum(p.numel() for p in model.parameters()) / 1_000_000),
         )
 
         lightning_model = LightningWrapper(
-            model.to(device),
+            model,
             dataset.defaults.target_table,
             lr=config["lr"],
             betas=config["betas"],
             task_type=dataset.defaults.task,
             verbose=False,
-        ).to(device)
+        )
 
         seed_everything(config["seed"], workers=True)
 
@@ -181,10 +181,8 @@ def train_model(config: tune.TuneConfig):
                     metrics=[
                         "train_loss",
                         "val_loss",
-                        "test_loss",
                         f"train_{metric}",
                         f"val_{metric}",
-                        f"test_{metric}",
                     ],
                 ),
                 MLFlowLoggerCallback(
@@ -196,14 +194,10 @@ def train_model(config: tune.TuneConfig):
                         "best_train_loss",
                         "val_loss",
                         "best_val_loss",
-                        "test_loss",
-                        "best_test_loss",
                         f"train_{metric}",
                         f"best_train_{metric}",
                         f"val_{metric}",
                         f"best_val_{metric}",
-                        f"test_{metric}",
-                        f"best_test_{metric}",
                     ],
                 ),
             ],
@@ -219,8 +213,92 @@ def train_model(config: tune.TuneConfig):
         client.set_terminated(run_id)
 
     except Exception as e:
+        print(str(e))
         client.set_tag(run_id, "exception", str(e))
         client.set_terminated(run_id, "FAILED")
+
+
+def get_tune_config(
+    model_type: Literal[
+        "excelformer",
+        "honza",
+        "mlp",
+        "saint",
+        "tabnet",
+        "tabtransformer",
+        "transformer",
+        "trompt",
+    ]
+):
+    if model_type == "mlp":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "none",
+            "gnn_layers": 0,
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "batch_norm": tune.choice([True, False]),
+        }
+    if model_type == "honza":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "sum",
+            "gnn_layers": tune.randint(1, 5),
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "batch_norm": tune.choice([True, False]),
+        }
+    if model_type == "transformer":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "attn",
+            "gnn_layers": tune.randint(1, 5),
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "batch_norm": tune.choice([True, False]),
+            "num_heads": tune.choice([1, 4, 8]),
+            "dropout": tune.choice([0.0, 0.2]),
+            "positional": False,
+            # "positional": True,
+            "encoder": "basic",
+            # "encoder": "with_embeddings",
+            # "encoder": "with_time",
+        }
+    if model_type == "saint":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": tune.choice(["attn", "sum"]),
+            "gnn_layers": tune.randint(1, 5),
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "batch_norm": tune.choice([True, False]),
+            "num_heads": tune.choice([4, 8]),
+            "dropout": 0.1,
+        }
+    if model_type == "trompt":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "sum",
+            "gnn_layers": tune.randint(1, 5),
+            "num_trompt_layers": tune.choice([2, 4, 6, 8]),
+        }
+    if model_type == "tabnet":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "sum",
+            "gnn_layers": tune.randint(1, 5),
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "num_layers": tune.choice([3, 5, 7]),
+        }
+    if model_type == "tabtransformer":
+        return {
+            "embed_dim": tune.choice([16, 32, 64]),
+            "aggr": "sum",
+            "gnn_layers": tune.randint(1, 5),
+            "mlp_dims": tune.choice([[], [64], [64, 64]]),
+            "batch_norm": tune.choice([True, False]),
+            "num_heads": tune.choice([2, 4, 8]),
+            "num_layers": tune.choice([1, 2, 3, 6]),
+            "dropout": tune.choice([0.0, 0.1, 0.2, 0.3]),
+        }
+
+    raise ValueError(f"Unknown model type '{model_type}'")
 
 
 def run_experiment(
@@ -232,6 +310,7 @@ def run_experiment(
     useCuda=False,
     log_dir: str = None,
     run_name: str = None,
+    model_type: str = "transformer",
     epochs: int = 500,
     metric: str = None,
     random_seed: int = RANDOM_SEED,
@@ -257,10 +336,14 @@ def run_experiment(
 
         analysis: tune.ExperimentAnalysis = tune.run(
             train_model,
-            verbose=1,
             metric=f"best_val_{metric}",
-            mode="max",
-            search_alg=OptunaSearch(),
+            mode="max" if metric == "acc" else "min",
+            verbose=1,
+            search_alg=OptunaSearch(
+                metric=f"best_val_{metric}",
+                mode="max" if metric == "acc" else "min",
+            ),
+            max_concurrent_trials=4,
             checkpoint_config=CheckpointConfig(num_to_keep=1),
             num_samples=num_samples,
             storage_path=log_dir,
@@ -271,16 +354,12 @@ def run_experiment(
             ),
             log_to_file=True,
             local_dir=log_dir,
-            resume=False,
             config={
-                "lr": tune.loguniform(0.00005, 0.001, base=10),
+                "lr": tune.loguniform(0.00005, 0.002),
                 "betas": [0.9, 0.999],
-                "embed_dim": tune.choice([32, 64]),
-                "aggr": tune.choice(["sum"]),
-                "gnn_layers": tune.randint(1, 5),
-                "mlp_dims": tune.choice([[], [64], [64, 64]]),
-                "batch_norm": tune.choice([True, False]),
+                **get_tune_config(model_type),
                 "batch_size_scale": tune.randint(0, 8),
+                "model_type": model_type,
                 "dataset": dataset,
                 "epochs": epochs,
                 "metric": metric,
@@ -332,6 +411,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--metric", type=str, default="acc")
+    parser.add_argument("--model_type", type=str, default="transformer")
 
     args = parser.parse_args()
     print(args)
@@ -345,6 +425,7 @@ if __name__ == "__main__":
         args.cuda,
         args.log_dir,
         args.run_name,
+        args.model_type,
         args.epochs,
         args.metric,
         args.seed,

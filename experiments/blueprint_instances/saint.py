@@ -35,6 +35,7 @@ def create_saint_model(
     mlp_dims = config.get("mlp_dims", [])
     num_heads = config.get("num_heads", 1)
     batch_norm = config.get("batch_norm", False)
+    aggr = config.get("aggr", "attn")
     dropout = 0.1
 
     is_classification = defaults.task == TaskType.CLASSIFICATION
@@ -90,7 +91,7 @@ def create_saint_model(
             ],
         ),
         table_combination=lambda i, edge, cols: CrossAttentionConv(
-            embed_dim, num_heads=num_heads, dropout=dropout, aggr="attn"
+            embed_dim, num_heads=num_heads, dropout=dropout, aggr=aggr
         ),
         post_combination=lambda i, node, cols: Sequential(
             "x_in, x_next",

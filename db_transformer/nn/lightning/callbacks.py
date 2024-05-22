@@ -5,6 +5,9 @@ import torch
 
 import lightning as L
 
+from mlflow.entities import Metric
+from mlflow.tracking import MlflowClient
+
 
 class BestMetricsLoggerCallback(L.Callback):
     def __init__(
@@ -27,15 +30,6 @@ class BestMetricsLoggerCallback(L.Callback):
         self.metrics = metrics
         self.best_value: Optional[float] = None
         self.verbose = verbose
-
-    def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
-        if self.cmp == "min":
-            trainer.callback_metrics[self.monitor] = torch.Tensor([10_000_000])
-            trainer.callback_metrics[f"best_{self.monitor}"] = torch.Tensor([10_000_000])
-
-        if self.cmp == "max":
-            trainer.callback_metrics[self.monitor] = torch.Tensor([0])
-            trainer.callback_metrics[f"best_{self.monitor}"] = torch.Tensor([0])
 
     def on_validation_epoch_end(
         self, trainer: L.Trainer, pl_module: L.LightningModule
@@ -76,11 +70,6 @@ class MLFlowLoggerCallback(L.Callback):
         metrics: Optional[List[str]] = None,
     ) -> None:
 
-        from mlflow.entities import Metric
-        from mlflow.tracking import MlflowClient
-
-        self.Metric = Metric
-
         self.run_id = run_id
         self.mlflow_client: MlflowClient = mlflow_client
         self.ray_session = ray_session
@@ -96,15 +85,6 @@ class MLFlowLoggerCallback(L.Callback):
             # fmt:on
         self.metrics = metrics
 
-    def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
-        metric_dict = {}
-
-        for metric_name in self.metrics:
-            if metric_name not in trainer.callback_metrics:
-                continue
-            metric_dict[metric_name] = trainer.callback_metrics[metric_name]
-        self.ray_session.report(metric_dict)
-
     def on_validation_epoch_end(
         self, trainer: L.Trainer, pl_module: L.LightningModule
     ) -> None:
@@ -119,7 +99,7 @@ class MLFlowLoggerCallback(L.Callback):
                 trainer.callback_metrics[metric_name].detach().cpu().item()
             )
             mlflow_metrics.append(
-                self.Metric(
+                Metric(
                     metric_name, metric_dict[metric_name], timestamp, trainer.current_epoch
                 )
             )
