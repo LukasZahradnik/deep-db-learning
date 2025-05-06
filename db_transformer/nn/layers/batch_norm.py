@@ -10,3 +10,6 @@ class SafeBatchNorm1d(torch.nn.Module):
         if x.size(0) < 2:
             return x
         return self.bn(x)
+
+    def reset_parameters(self):
+        self.bn.reset_parameters()
