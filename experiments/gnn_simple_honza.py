@@ -35,8 +35,7 @@ from db_transformer.helpers.timer import Timer
 from db_transformer.schema.columns import CategoricalColumnDef, NumericColumnDef
 from db_transformer.schema.schema import ColumnDef, Schema
 
-from db_transformer.nn import HeteroGNN
-from db_transformer.nn.layers import NodeApplied, PerFeatureNorm
+from db_transformer.nn import HeteroGNN, NodeApplied, PerFeatureNorm, SafeBatchNorm1d
 
 lt.monkey_patch()
 
@@ -130,7 +129,7 @@ class Model(torch.nn.Module):
                 mlp_layers += [torch.nn.ReLU(), torch.nn.Linear(a, b)]
 
                 if config.batch_norm:
-                    mlp_layers += [torch.nn.BatchNorm1d(b)]
+                    mlp_layers += [SafeBatchNorm1d(b)]
 
             if config.batch_norm:
                 del mlp_layers[-1]

@@ -9,7 +9,7 @@ import math
 import torch
 import torch.nn.functional as F
 
-import torch_frame
+from db_transformer.nn import SafeBatchNorm1d
 
 
 class TabNetEncoder(torch.nn.Module):
@@ -37,7 +37,7 @@ class TabNetEncoder(torch.nn.Module):
         in_channels = channels * num_cols
 
         # Batch norm applied to input feature.
-        self.bn = torch.nn.BatchNorm1d(in_channels)
+        self.bn = SafeBatchNorm1d(in_channels)
 
         self.feat_transformers = torch.nn.ModuleList()
         for _ in range(self.num_layers + 1):
@@ -293,7 +293,7 @@ class GhostBatchNorm1d(torch.nn.Module):
 
         self.input_dim = input_dim
         self.virtual_batch_size = virtual_batch_size
-        self.bn = torch.nn.BatchNorm1d(self.input_dim)
+        self.bn = SafeBatchNorm1d(self.input_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if len(x) > 0:

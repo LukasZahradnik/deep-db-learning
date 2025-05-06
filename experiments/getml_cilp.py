@@ -48,6 +48,7 @@ from db_transformer.schema.columns import (
     TimeColumnDef,
 )
 from db_transformer.schema.schema import ForeignKeyDef, Schema
+from db_transformer.nn import SafeBatchNorm1d
 
 random.seed(0)
 np.random.seed(0)
@@ -654,7 +655,7 @@ def main(
         for i in range(len(mlp_dims) - 1):
             if i > 0:
                 if batch_norm:
-                    mlp_layers.append(torch.nn.BatchNorm1d(mlp_dims[i]))
+                    mlp_layers.append(SafeBatchNorm1d(mlp_dims[i]))
                 mlp_layers.append(layer_activation())
             mlp_layers.append(torch.nn.Linear(mlp_dims[i], mlp_dims[i + 1]))
 

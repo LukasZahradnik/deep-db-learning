@@ -20,6 +20,7 @@ from db_transformer.data.dataset_defaults.fit_dataset_defaults import (
     TaskType,
 )
 from db_transformer.nn.embedder import SingleTableEmbedder, CatEmbedder, NumEmbedder
+from db_transformer.nn.layers import SafeBatchNorm1d
 from db_transformer.data.fit_dataset import FITRelationalDataset
 from db_transformer.data.utils import HeteroDataBuilder
 from db_transformer.helpers.timer import Timer
@@ -64,7 +65,7 @@ class LinearBlock(torch.nn.Module):
         self.block = torch.nn.ModuleList()
         self.block.append(torch.nn.Linear(in_dim, out_dim, bias=not config.batch_norm))
         if config.batch_norm:
-            self.block.append(torch.nn.BatchNorm1d(out_dim))
+            self.block.append(SafeBatchNorm1d(out_dim))
         self.block.append(torch.nn.ReLU())
         if config.dropout > 0.0:
             self.block.append(torch.nn.Dropout1d(p=config.dropout))

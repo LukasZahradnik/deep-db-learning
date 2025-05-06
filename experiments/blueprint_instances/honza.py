@@ -9,7 +9,7 @@ from torch_frame import stype
 from torch_frame.data import StatType
 
 from db_transformer.data import CTUDatasetDefault, TaskType
-from db_transformer.nn import BlueprintModel
+from db_transformer.nn import BlueprintModel, SafeBatchNorm1d
 
 from .utils import get_decoder, get_encoder
 
@@ -52,7 +52,7 @@ def create_honza_model(
             if i == 0
             else torch.nn.Sequential(
                 (
-                    torch.nn.BatchNorm1d(
+                    SafeBatchNorm1d(
                         len(cols) * int(embed_dim / 2**i),
                     )
                     if batch_norm
