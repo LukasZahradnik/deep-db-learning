@@ -465,8 +465,8 @@ def run(dataset_name: str, seed: int = RANDOM_SEED) -> dict[str, Any]:
         y_true_train = y_true[train_mask]
         y_true_test = y_true[val_mask]
 
-        y_pred_train = np.argmax(np.stack(list(train_results_per_class.values()), -1), -1)
-        y_pred_test = np.argmax(np.stack(list(test_results_per_class.values()), -1), -1)
+        y_pred_train = np.stack(list(train_results_per_class.values()), -1)
+        y_pred_test = np.stack(list(test_results_per_class.values()), -1)
 
     metrics_report = {}
     for mname, metric in metrics.items():
