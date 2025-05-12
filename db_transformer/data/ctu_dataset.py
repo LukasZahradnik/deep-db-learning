@@ -8,6 +8,7 @@ import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+import numpy as np
 
 from sqlalchemy.engine import Connection, create_engine
 from sqlalchemy.schema import MetaData, Table as SQLTable
@@ -16,6 +17,8 @@ from sqlalchemy.sql import select, text
 from sklearn.preprocessing import MultiLabelBinarizer
 
 import torch
+
+from sentence_transformers import SentenceTransformer
 
 import torch_geometric.transforms as T
 from torch_geometric.data import HeteroData
@@ -26,7 +29,7 @@ from torch_frame.config import TextEmbedderConfig
 from torch_frame.data import Dataset, StatType
 from torch_frame.utils import infer_series_stype
 
-from relbench.data import Database, Table
+from relbench.base import Database, Table
 
 from db_transformer.db.db_inspector import DBInspector
 from db_transformer.db.schema_autodetect import SchemaAnalyzer
@@ -41,15 +44,14 @@ from db_transformer.helpers.objectpickle import serialize, deserialize
 
 
 class GloveTextEmbedding:
-    def __init__(self):
-        from sentence_transformers import SentenceTransformer
-
+    def __init__(self, device: Optional[torch.device] = None):
         self.model = SentenceTransformer(
-            "sentence-transformers/average_word_embeddings_glove.6B.300d"
+            "sentence-transformers/average_word_embeddings_glove.6B.300d",
+            device=device,
         )
 
     def __call__(self, sentences: List[str]) -> torch.Tensor:
-        return torch.from_numpy(self.model.encode(sentences, show_progress_bar=False))
+        return self.model.encode(sentences, convert_to_tensor=True)
 
 
 class CTUDataset:
@@ -98,6 +100,10 @@ class CTUDataset:
     def schema_path(self):
         return os.path.join(self.db_dir, "schema.json")
 
+    @property
+    def materialized_dir(self):
+        return os.path.join(self.root_dir, "materialized")
+
     def build_hetero_data(
         self,
         device: str = None,
@@ -112,7 +118,7 @@ class CTUDataset:
             table_name: table.df for table_name, table in self.db.table_dict.items()
         }
 
-        materialized_dir = os.path.join(self.root_dir, "materialized")
+        materialized_dir = self.materialized_dir
         if force_rematerilize and os.path.exists(materialized_dir):
             shutil.rmtree(materialized_dir)
         Path(materialized_dir).mkdir(parents=True, exist_ok=True)
@@ -120,7 +126,9 @@ class CTUDataset:
         if no_text_emebedding:
             text_embedder_cfg = None
         else:
-            text_embedder_cfg = TextEmbedderConfig(text_embedder=GloveTextEmbedding())
+            text_embedder_cfg = TextEmbedderConfig(
+                text_embedder=GloveTextEmbedding(device=torch.device("cpu")), batch_size=256
+            )
 
         for table_name, table_schema in wrap_progress(
             self.schema.items(), verbose=True, desc="Building data"
@@ -198,7 +206,7 @@ class CTUDataset:
                     col_to_stype=col_to_stype,
                     col_to_text_embedder_cfg=text_embedder_cfg,
                     target_col=target_col,
-                ).materialize(device, path=os.path.join(materialized_dir, table_name))
+                ).materialize(path=os.path.join(materialized_dir, table_name))
 
             try:
                 dataset = __build_frame_dataset(df, col_to_stype)
@@ -215,7 +223,7 @@ class CTUDataset:
             stype_to_col_str = "\n".join(
                 [f"\t{k}: {v}" for k, v in dataset.tensor_frame.col_names_dict.items()]
             )
-            print(f"Table {table_name} has stypes:\n{stype_to_col_str}")
+            # print(f"Table {table_name} has stypes:\n{stype_to_col_str}")
 
             data[table_name].tf = dataset.tensor_frame.to(device)
             col_stats_dict[table_name] = dataset.col_stats
@@ -233,7 +241,7 @@ class CTUDataset:
 
     @classmethod
     def get_url(cls, dataset: CTUDatasetName) -> str:
-        connector = "mariadb+mysqlconnector"
+        connector = "mariadb+pymysql"
         port = 3306
         return f"{connector}://guest:ctu-relational@relational.fel.cvut.cz:{port}/{dataset}"
 
@@ -265,9 +273,11 @@ class CTUDataset:
         remote_md.reflect(bind=inspector.engine)
 
         tables = {}
+        table_names = list(inspector.get_tables())
+        table_names.sort()
 
         for table_name in wrap_progress(
-            inspector.get_tables(), verbose=True, desc="Downloading tables"
+            table_names, verbose=True, desc="Downloading tables"
         ):
             pk = inspector.get_primary_key(table_name)
             pkey_col = list(pk)[0] if len(pk) == 1 else None
