@@ -8,6 +8,17 @@ import lightning as L
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import EdgeType, NodeType
 
+from torchmetrics import (
+    Accuracy,
+    F1Score,
+    MeanAbsoluteError,
+    MeanSquaredError,
+    MeanSquaredLogError,
+    NormalizedRootMeanSquaredError,
+    R2Score,
+    AUROC,
+)
+
 from db_transformer.data import TaskType
 
 
@@ -15,12 +26,13 @@ class LightningWrapper(L.LightningModule):
     def __init__(
         self,
         model: torch.nn.Module,
-        target_table: str,
+        target_table: str = None,
         lr: float = 0.0001,
         betas: Tuple[float, float] = (0.9, 0.999),
         loss_module: Optional[torch.nn.Module] = None,
         metrics: Optional[Dict[str, torch.nn.Module]] = None,
         task_type: TaskType = TaskType.CLASSIFICATION,
+        num_classes: Optional[int] = None,
         data_key: str = "tf",
         verbose: bool = True,
     ) -> None:
@@ -30,6 +42,7 @@ class LightningWrapper(L.LightningModule):
         self.lr = lr
         self.betas = betas
         self.task_type = task_type
+        self.num_classes = num_classes
         self.data_key = data_key
         self.verbose = verbose
 
@@ -42,54 +55,73 @@ class LightningWrapper(L.LightningModule):
         if metrics is None:
             metrics = {}
             if task_type == TaskType.CLASSIFICATION:
-                metrics["acc"] = (
-                    lambda out, target: (out.argmax(dim=-1) == target)
-                    .type(torch.float)
-                    .mean()
+                assert (
+                    num_classes is not None
+                ), "num_classes is required to initialize metrics for classification task"
+                task = "binary" if num_classes == 2 else "multiclass"
+                metrics["acc"] = Accuracy(
+                    task=task, num_classes=num_classes, average="micro"
                 )
+                metrics["f1_micro"] = F1Score(
+                    task=task, num_classes=num_classes, average="micro"
+                )
+                metrics["f1_macro"] = F1Score(
+                    task=task, num_classes=num_classes, average="macro"
+                )
+                metrics["auroc"] = AUROC(
+                    task=task, num_classes=num_classes, average="macro"
+                )
+
             if task_type == TaskType.REGRESSION:
-                metrics["mae"] = torch.nn.L1Loss(reduction="mean")
-                metrics["mse"] = torch.nn.MSELoss(reduction="mean")
-                metrics["nrmse"] = (
-                    lambda out, target: torch.sqrt(
-                        F.mse_loss(out, target, reduction="mean")
-                    )
-                    / target.mean()
-                )
+                metrics["mae"] = MeanAbsoluteError()
+                metrics["mse"] = MeanSquaredError()
+                metrics["msle"] = MeanSquaredLogError()
+                metrics["nrmse"] = NormalizedRootMeanSquaredError(normalization="range")
 
         self.loss_module = loss_module
         self.metrics = metrics
 
     def forward(self, data: HeteroData, mode: str = "train"):
-        out: torch.Tensor = self.model(
-            data.collect(self.data_key), data.collect("edge_index", allow_empty=True)
-        )
-        out = out.squeeze(dim=-1)
+        if self.target_table is not None:
+            out: torch.Tensor = self.model(
+                data.collect(self.data_key), data.collect("edge_index", allow_empty=True)
+            )
+            target: torch.Tensor = data[self.target_table].y
 
-        target: torch.Tensor = data[self.target_table].y
+        else:
+            out: torch.Tensor = self.model(data[0])
+            target: torch.Tensor = data[1]
+
+        out = out.squeeze(dim=-1)
 
         loss = self.loss_module(out, target)
 
         batch_size = target.shape[0]
-        self.log(
-            f"{mode}_loss",
-            loss,
-            batch_size=batch_size,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=self.verbose,
-        )
+        with torch.no_grad():
 
-        metric_dict = {
-            f"{mode}_{name}": metric(out, target) for name, metric in self.metrics.items()
-        }
-        self.log_dict(
-            metric_dict,
-            batch_size=batch_size,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=self.verbose,
-        )
+            self.log(
+                f"{mode}_loss",
+                loss,
+                batch_size=batch_size,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=self.verbose,
+            )
+
+            if self.task_type == TaskType.CLASSIFICATION and self.num_classes == 2:
+                out = out.argmax(dim=1)
+
+            metric_dict = {
+                f"{mode}_{name}": metric(out, target)
+                for name, metric in self.metrics.items()
+            }
+            self.log_dict(
+                metric_dict,
+                batch_size=batch_size,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=self.verbose,
+            )
 
         return loss
 

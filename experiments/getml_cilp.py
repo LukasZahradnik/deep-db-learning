@@ -4,7 +4,6 @@ from pathlib import Path
 import traceback
 import os, sys
 
-sys.path.append(os.getcwd())
 import random
 import uuid
 from collections import defaultdict
@@ -25,11 +24,20 @@ import pandas as pd
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import lightning as L
+from lightning.pytorch import seed_everything
 
 import torch_geometric.transforms as T
 
 from torch_frame.data import StatType
 
+
+sys.path.append(os.getcwd())
+
+from db_transformer.nn.lightning import LightningWrapper
+from db_transformer.nn.lightning.callbacks import (
+    BestMetricsLoggerCallback,
+    MLFlowLoggerCallback,
+)
 from db_transformer.data import (
     CTUDataset,
     CTUDatasetName,
@@ -127,7 +135,7 @@ def label_getml_roles(
                 role = None
 
             if role is not None:
-                print(column_name, role)
+                # print(column_name, role)
                 table.set_role(column_name, role)
 
     if (
@@ -149,9 +157,9 @@ def label_getml_roles(
         df_dict[TARGET_TABLE] = df_dict[defaults.target_table].copy(name=TARGET_TABLE)
         df_dict[TARGET_TABLE].set_role(defaults.target_column, getml.data.roles.target)
 
-    for name, df in df_dict.items():
-        for col in df.columns:
-            print(name, col, type(df[col]))
+    # for name, df in df_dict.items():
+    #     for col in df.columns:
+    #         print(name, col, type(df[col]))
 
     return df_dict
 
@@ -372,199 +380,12 @@ def build_getml_datamodel(
     return dm
 
 
-class BestMetricsLoggerCallback(L.Callback):
-    def __init__(
-        self,
-        monitor: str = "val_acc",
-        cmp: Literal["min", "max"] = "max",
-        metrics: Optional[Dict[str, str]] = None,
-        verbose: bool = True,
-    ) -> None:
-        if metrics is None:
-            # fmt:off
-            metrics = [
-                "train_acc", "val_acc", "test_acc", "train_err", "val_err", "test_err",
-                "train_loss", "val_loss", "test_loss"
-            ]
-            # fmt:on
-
-        self.monitor = monitor
-        self.cmp = cmp
-        self.metrics = metrics
-        self.best_value: Optional[float] = None
-        self.verbose = verbose
-
-    def on_validation_epoch_end(
-        self, trainer: L.Trainer, pl_module: L.LightningModule
-    ) -> None:
-        if self.monitor not in trainer.callback_metrics:
-            return
-
-        mon_value = trainer.callback_metrics[self.monitor].detach().cpu().item()
-
-        if self.best_value is not None and (
-            self.cmp == "min" and mon_value >= self.best_value
-        ):
-            return
-
-        if self.best_value is not None and (
-            self.cmp == "max" and mon_value <= self.best_value
-        ):
-            return
-
-        self.best_value = mon_value
-        metric_dict = {}
-        for metric_name in self.metrics:
-            if metric_name not in trainer.callback_metrics:
-                continue
-            metric_dict[f"best_{metric_name}"] = (
-                trainer.callback_metrics[metric_name].detach().cpu().item()
-            )
-
-        pl_module.log_dict(metric_dict, prog_bar=self.verbose)
-
-
-class MLFlowLoggerCallback(L.Callback):
-    def __init__(
-        self,
-        run_id: str,
-        mlflow_client: mlflow.MlflowClient,
-        metrics: Optional[List[str]] = None,
-    ) -> None:
-
-        self.run_id = run_id
-        self.mlflow_client = mlflow_client
-
-        if metrics is None:
-            # fmt:off
-            metrics = [
-                "train_acc", "best_train_acc", "val_acc", "best_val_acc", "test_acc",
-                "best_test_acc", "train_loss", "best_train_loss", "val_loss", 
-                "best_val_loss", "test_loss", "best_test_loss", "train_err", 
-                "best_train_err", "val_err", "best_val_err", "test_err", "best_test_err",
-            ]
-            # fmt:on
-        self.metrics = metrics
-
-    def on_validation_epoch_end(
-        self, trainer: L.Trainer, pl_module: L.LightningModule
-    ) -> None:
-        metric_dict = {}
-        mlflow_metrics = []
-        timestamp = int(datetime.now().timestamp() * 1000)
-
-        for metric_name in self.metrics:
-            if metric_name not in trainer.callback_metrics:
-                continue
-            metric_dict[metric_name] = (
-                trainer.callback_metrics[metric_name].detach().cpu().item()
-            )
-            mlflow_metrics.append(
-                Metric(
-                    metric_name, metric_dict[metric_name], timestamp, trainer.current_epoch
-                )
-            )
-
-        self.mlflow_client.log_batch(self.run_id, metrics=mlflow_metrics, synchronous=False)
-
-
-class LightningWrapper(L.LightningModule):
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        lr: float = 0.0001,
-        betas: Tuple[float, float] = (0.9, 0.999),
-        loss_module: Optional[torch.nn.Module] = None,
-        metrics: Optional[Dict[str, torch.nn.Module]] = None,
-        task_type: TaskType = TaskType.CLASSIFICATION,
-        verbose: bool = True,
-    ) -> None:
-        super().__init__()
-        self.model = model
-        self.lr = lr
-        self.betas = betas
-        self.task_type = task_type
-        self.verbose = verbose
-
-        if loss_module is None:
-            if task_type == TaskType.CLASSIFICATION:
-                loss_module = torch.nn.CrossEntropyLoss(reduction="mean")
-            else:
-                loss_module = torch.nn.MSELoss(reduction="mean")
-
-        if metrics is None:
-            metrics = {}
-            if task_type == TaskType.CLASSIFICATION:
-                metrics["acc"] = (
-                    lambda out, target: (out.argmax(dim=-1) == target)
-                    .type(torch.float)
-                    .mean()
-                )
-            if task_type == TaskType.REGRESSION:
-                metrics["mae"] = torch.nn.L1Loss(reduction="mean")
-                metrics["mse"] = torch.nn.MSELoss(reduction="mean")
-                metrics["nrmse"] = (
-                    lambda out, target: torch.sqrt(
-                        torch.nn.functional.mse_loss(out, target, reduction="mean")
-                    )
-                    / target.mean()
-                )
-
-        self.loss_module = loss_module
-        self.metrics = metrics
-
-    def forward(self, data: Tuple[torch.Tensor, torch.Tensor], mode: str = "train"):
-
-        out: torch.Tensor = self.model(data[0])
-        out = out.squeeze(dim=-1)
-
-        target: torch.Tensor = data[1]
-
-        loss = self.loss_module(out, target)
-
-        batch_size = target.shape[0]
-        self.log(
-            f"{mode}_loss",
-            loss,
-            batch_size=batch_size,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=self.verbose,
-        )
-
-        metric_dict = {
-            f"{mode}_{name}": metric(out, target) for name, metric in self.metrics.items()
-        }
-        self.log_dict(
-            metric_dict,
-            batch_size=batch_size,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=self.verbose,
-        )
-
-        return loss
-
-    def configure_optimizers(self):
-        self.opt = torch.optim.Adam(self.parameters(), lr=self.lr, betas=self.betas)
-        return {"optimizer": self.opt}
-
-    def training_step(self, batch):
-        loss = self.forward(batch, "train")
-        return loss
-
-    def validation_step(self, batch):
-        self.forward(batch, "val")
-
-    def test_step(self, batch):
-        self.forward(batch, "test")
-
-
 def main(
     run_id: str,
     client: mlflow.MlflowClient,
     dataset_name: str,
     max_depth: int,
+    seed: int = RANDOM_SEED,
 ):
     dataset = CTUDataset(dataset_name, data_dir="./datasets")
     data, col_stats_dict = dataset.build_hetero_data()
@@ -572,6 +393,7 @@ def main(
     defaults = dataset.defaults
     schema = dataset.schema
 
+    seed_everything(seed)
     n_total = data[defaults.target_table].y.shape[0]
     data = T.RandomNodeSplit("train_rest", num_val=int(0.30 * n_total), num_test=0)(data)
 
@@ -588,10 +410,10 @@ def main(
     container.freeze()
 
     nodes, edges = bfs(schema, defaults.target_table, max_depth=max_depth)
-    print(nodes)
-    print(edges)
+    # print(nodes)
+    # print(edges)
     dm = build_getml_datamodel(data_df, nodes, edges)
-    print(dm)
+    # print(dm)
 
     mapping = getml.preprocessors.Mapping()
 
@@ -609,7 +431,7 @@ def main(
 
     pipe = getml.pipeline.Pipeline(
         data_model=dm,
-        preprocessors=[mapping],
+        # preprocessors=[mapping],
         feature_learners=[fast_prop],
         share_selected_features=0.5,
         include_categorical=True,
@@ -680,21 +502,28 @@ def main(
     )
 
     lightning_model = LightningWrapper(
-        model, task_type=dataset.defaults.task, verbose=False
+        model,
+        lr=0.001,
+        task_type=defaults.task,
+        verbose=False,
+        num_classes=output_dim,
     )
 
-    metric = "acc" if is_classification else "nrmse"
+    if defaults.task == TaskType.CLASSIFICATION:
+        metric = "auroc"
+        higher_is_better = True
+    elif defaults.task == TaskType.REGRESSION:
+        metric = "mae"
+        higher_is_better = False
+    else:
+        raise ValueError(f"Unknown task type '{defaults.task}'")
 
-    metrics_list = [
-        "train_loss",
-        "best_train_loss",
-        "val_loss",
-        "best_val_loss",
-        f"train_{metric}",
-        f"best_train_{metric}",
-        f"val_{metric}",
-        f"best_val_{metric}",
-    ]
+    log_metrics = []
+    all_metrics = []
+    for m_name in ["loss", *lightning_model.metrics.keys()]:
+        log_metrics.extend([f"train_{m_name}", f"val_{m_name}"])
+    for m_name in log_metrics:
+        all_metrics.extend([m_name, f"best_{m_name}"])
 
     trainer = L.Trainer(
         accelerator="cpu",
@@ -703,22 +532,17 @@ def main(
         callbacks=[
             BestMetricsLoggerCallback(
                 monitor=f"val_{metric}",
-                cmp="max" if metric == "acc" else "min",
-                metrics=[
-                    "train_loss",
-                    "val_loss",
-                    f"train_{metric}",
-                    f"val_{metric}",
-                ],
+                cmp="max" if higher_is_better else "min",
+                metrics=log_metrics,
             ),
             MLFlowLoggerCallback(
                 run_id,
                 client,
-                metrics=metrics_list,
+                metrics=all_metrics,
             ),
         ],
         max_time=timedelta(hours=1),
-        max_epochs=2000,
+        max_epochs=500,
         min_epochs=2,
         max_steps=2000 * 2,
         enable_checkpointing=False,
@@ -728,7 +552,7 @@ def main(
     trainer.fit(lightning_model, train_loader, val_dataloaders=val_loader)
     client.set_terminated(run_id)
 
-    return {m: trainer.callback_metrics.get(m, None) for m in metrics_list}
+    return {m: trainer.callback_metrics.get(m, None) for m in all_metrics}
 
 
 def run_experiment(
@@ -782,12 +606,14 @@ def run_experiment(
             client.log_param(run.info.run_id, "max_depth", depth)
 
             try:
-                metrics = main(run.info.run_id, client, dataset, depth)
+                metrics = main(run.info.run_id, client, dataset, depth, random_seed)
                 mlflow.log_metrics({k: v for (k, v) in metrics.items() if v is not None})
+
                 break
             except Exception as e:
                 print(traceback.format_exc())
                 client.set_tag(run.info.run_id, "exception", str(e))
+                client.set_terminated(run.info.run_id, "FAILED")
 
 
 if __name__ == "__main__":
@@ -801,6 +627,7 @@ if __name__ == "__main__":
     parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--log_dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
 
     args = parser.parse_args()
     print(args)
@@ -811,4 +638,5 @@ if __name__ == "__main__":
         args.dataset,
         args.run_name,
         args.log_dir,
+        args.seed,
     )

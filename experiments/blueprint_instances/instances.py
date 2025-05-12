@@ -60,7 +60,7 @@ def create_blueprint_model(
         return create_tabtransformer_model(
             defaults, col_names_dict, edge_types, col_stats_dict, config
         )
-    if instance == "transformer":
+    if instance.startswith("transformer"):
         return create_transformer_model(
             defaults, col_names_dict, edge_types, col_stats_dict, config
         )

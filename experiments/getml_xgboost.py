@@ -1,26 +1,39 @@
+from typing import Callable, Dict, Literal, Optional, TypeVar, get_args
+
 import argparse
 from datetime import datetime
 from pathlib import Path
 import traceback
 import os, sys
-
-sys.path.append(os.getcwd())
 import random
 import uuid
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from typing import Callable, Literal, Optional, TypeVar, get_args
-from typing import get_args as t_get_args
 
-import getml
-import mlflow
-from mlflow.entities import Param
-from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
 
 import numpy as np
 import pandas as pd
 import torch
+import getml
 import torch_geometric.transforms as T
+from torchmetrics import (
+    Accuracy,
+    F1Score,
+    MeanAbsoluteError,
+    MeanSquaredError,
+    MeanSquaredLogError,
+    NormalizedRootMeanSquaredError,
+    R2Score,
+    AUROC,
+)
+from lightning.pytorch import seed_everything
+
+import mlflow
+from mlflow.entities import Param
+from mlflow.utils.mlflow_tags import MLFLOW_USER, MLFLOW_PARENT_RUN_ID
+
+sys.path.append(os.getcwd())
+
 from db_transformer.data import (
     CTUDataset,
     CTUDatasetName,
@@ -38,6 +51,7 @@ from db_transformer.schema.columns import (
     TextColumnDef,
     TimeColumnDef,
 )
+
 from db_transformer.schema.schema import ForeignKeyDef, Schema
 from getml.feature_learning import loss_functions
 from sqlalchemy.engine import Connection
@@ -119,7 +133,6 @@ def label_getml_roles(
                 role = None
 
             if role is not None:
-                print(column_name, role)
                 table.set_role(column_name, role)
 
     if (
@@ -141,9 +154,9 @@ def label_getml_roles(
         df_dict[TARGET_TABLE] = df_dict[defaults.target_table].copy(name=TARGET_TABLE)
         df_dict[TARGET_TABLE].set_role(defaults.target_column, getml.data.roles.target)
 
-    for name, df in df_dict.items():
-        for col in df.columns:
-            print(name, col, type(df[col]))
+    # for name, df in df_dict.items():
+    #     for col in df.columns:
+    #         print(name, col, type(df[col]))
 
     return df_dict
 
@@ -376,6 +389,41 @@ def strip_targets_prefix(targets: list[str], target_column: str) -> list[str]:
     return out
 
 
+def get_metrics(
+    task_type: TaskType, num_classes: Optional[int] = None
+) -> dict[str, Callable[[np.ndarray, np.ndarray], float]]:
+    metrics = {}
+    if task_type == TaskType.CLASSIFICATION:
+        assert (
+            num_classes is not None
+        ), "num_classes is required to initialize metrics for classification task"
+        task = "binary" if num_classes == 2 else "multiclass"
+        metrics["acc"] = Accuracy(task=task, num_classes=num_classes, average="micro")
+        metrics["f1_micro"] = F1Score(task=task, num_classes=num_classes, average="micro")
+        metrics["f1_macro"] = F1Score(task=task, num_classes=num_classes, average="macro")
+        metrics["auroc"] = AUROC(task=task, num_classes=num_classes, average="macro")
+
+    elif task_type == TaskType.REGRESSION:
+        metrics["mae"] = MeanAbsoluteError()
+        metrics["mse"] = MeanSquaredError()
+        metrics["msle"] = MeanSquaredLogError()
+        metrics["nrmse"] = NormalizedRootMeanSquaredError(normalization="range")
+
+    else:
+        raise ValueError("unsupported task type")
+
+    return metrics
+
+
+def get_targets(df: pd.DataFrame, target_column: str, task_type: TaskType) -> np.ndarray:
+    if task_type == TaskType.CLASSIFICATION:
+        targets = df[target_column].apply(int).to_numpy()
+
+    elif task_type == TaskType.REGRESSION:
+        targets = df[target_column].apply(float).to_numpy()
+    return targets
+
+
 def evaluate_accuracy(
     targets: list[str], target_column: str, y_pred_prob: np.ndarray, y_true: pd.Series
 ) -> float:
@@ -391,13 +439,14 @@ def evaluate_accuracy(
     return np.mean(y_pred == y_true_np)
 
 
-def main(dataset_name: str, max_depth: int):
+def main(dataset_name: str, max_depth: int, seed: int = RANDOM_SEED):
     dataset = CTUDataset(dataset_name, data_dir="./datasets")
     data, _ = dataset.build_hetero_data()
 
     defaults = dataset.defaults
     schema = dataset.schema
 
+    seed_everything(seed)
     n_total = data[defaults.target_table].y.shape[0]
     data = T.RandomNodeSplit("train_rest", num_val=int(0.30 * n_total), num_test=0)(data)
 
@@ -405,11 +454,6 @@ def main(dataset_name: str, max_depth: int):
         {n: t.df for n, t in dataset.db.table_dict.items()}, schema, defaults
     )
 
-    # for tname, tbl in data_df.items():
-    #     print(tname, tbl)
-
-    # build split
-    # split = getml.data.split.random(train=0.7, test=0.3)  # TODO use universal split
     split = pd.Series(data[defaults.target_table].train_mask.numpy())
     split = split.map({True: "train", False: "test"}).to_frame("split")
     split = getml.data.DataFrame.from_pandas(split, "split")["split"]
@@ -419,10 +463,10 @@ def main(dataset_name: str, max_depth: int):
     container.freeze()
 
     nodes, edges = bfs(schema, defaults.target_table, max_depth=max_depth)
-    print(nodes)
-    print(edges)
+    # print(nodes)
+    # print(edges)
     dm = build_getml_datamodel(data_df, nodes, edges)
-    print(dm)
+    # print(dm)
 
     mapping = getml.preprocessors.Mapping()
 
@@ -442,73 +486,53 @@ def main(dataset_name: str, max_depth: int):
 
     pipe = getml.pipeline.Pipeline(
         data_model=dm,
-        preprocessors=[mapping],
+        # preprocessors=[mapping],
         feature_learners=[fast_prop],
         # feature_selectors=[feature_selector],
         predictors=[predictor],
         share_selected_features=0.5,
     )
 
+    num_classes = (
+        len(data_df[defaults.target_table].to_pandas()[defaults.target_column].unique())
+        if defaults.task == TaskType.CLASSIFICATION
+        else 1
+    )
+    metrics = get_metrics(defaults.task, num_classes=num_classes)
+    metrics_report = {}
+
     pipe = pipe.fit(container.train)
-    y_pred = pipe.predict(container.train)
-    assert y_pred is not None
 
-    # print(pipe.score(container.train))
-
-    metrics = {}
-    if defaults.task == TaskType.CLASSIFICATION:
-        train_acc = evaluate_accuracy(
-            pipe.targets,
-            defaults.target_column,
-            y_pred,
-            data_df[defaults.target_table][split == "train"].to_pandas()[
-                defaults.target_column
-            ],
-        )
-        print("train_acc:", train_acc)
-        metrics["best_train_acc"] = train_acc
+    pred_train = pipe.predict(container.train)
     if defaults.task == TaskType.REGRESSION:
-        target_vals: np.ndarray = (
-            data_df[defaults.target_table][split == "train"]
-            .to_pandas()[defaults.target_column]
-            .apply(float)
-            .to_numpy()
-        )
-        train_nrmse = (
-            np.sqrt(((y_pred.squeeze() - target_vals) ** 2).mean()) / target_vals.mean()
-        )
-        print("train_nrmse:", train_nrmse)
-        metrics["best_train_nrmse"] = train_nrmse
+        pred_train = pred_train.squeeze()
+    if defaults.task == TaskType.CLASSIFICATION and num_classes == 2:
+        pred_train = pred_train.argmax(axis=1)
 
-    y_pred = pipe.predict(container.test)
+    targets_train = get_targets(
+        data_df[defaults.target_table][split == "train"].to_pandas(),
+        defaults.target_column,
+        defaults.task,
+    )
 
-    # print(pipe.score(container.test))
-
-    if defaults.task == TaskType.CLASSIFICATION:
-        test_acc = evaluate_accuracy(
-            pipe.targets,
-            defaults.target_column,
-            y_pred,
-            data_df[defaults.target_table][split == "test"].to_pandas()[
-                defaults.target_column
-            ],
-        )
-        print("test_acc:", test_acc)
-        metrics["best_val_acc"] = test_acc
+    pred_test = pipe.predict(container.test)
     if defaults.task == TaskType.REGRESSION:
-        target_vals: np.ndarray = (
-            data_df[defaults.target_table][split == "test"]
-            .to_pandas()[defaults.target_column]
-            .apply(float)
-            .to_numpy()
-        )
-        val_nrmse = (
-            np.sqrt(((y_pred.squeeze() - target_vals) ** 2).mean()) / target_vals.mean()
-        )
-        print("val_nrmse:", val_nrmse)
-        metrics["best_val_nrmse"] = val_nrmse
+        pred_test = pred_test.squeeze()
+    if defaults.task == TaskType.CLASSIFICATION and num_classes == 2:
+        pred_test = pred_test.argmax(axis=1)
+    targets_test = get_targets(
+        data_df[defaults.target_table][split == "test"].to_pandas(),
+        defaults.target_column,
+        defaults.task,
+    )
 
-    return metrics
+    for mname, metric in metrics.items():
+        metric_train = metric(torch.from_numpy(pred_train), torch.from_numpy(targets_train))
+        metric_test = metric(torch.from_numpy(pred_test), torch.from_numpy(targets_test))
+        metrics_report[f"best_train_{mname}"] = metric_train
+        metrics_report[f"best_val_{mname}"] = metric_test
+
+    return metrics_report
 
 
 def run_experiment(
@@ -519,9 +543,6 @@ def run_experiment(
     log_dir: str = None,
     random_seed: int = RANDOM_SEED,
 ):
-    random.seed(random_seed)
-    np.random.seed(random_seed)
-    torch.manual_seed(random_seed)
 
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name=experiment_name)
@@ -532,7 +553,8 @@ def run_experiment(
     getml.engine.launch(
         launch_browser=False,
         project_directory=f"./datasets/{dataset}",
-        allow_remote_ips=True,
+        allow_remote_ips=False,
+        in_memory=True,
     )
     getml.engine.set_project(dataset)
 
@@ -558,19 +580,22 @@ def run_experiment(
                     "Dataset": dataset,
                 },
             )
+
             client.log_param(run.info.run_id, "dataset", dataset)
             client.log_param(run.info.run_id, "max_depth", depth)
 
             try:
-                metrics = main(dataset, depth)
+                metrics = main(dataset, depth, random_seed)
 
                 for m, v in metrics.items():
                     client.log_metric(run.info.run_id, m, v)
                 mlflow.log_metrics({k: v for (k, v) in metrics.items()})
+                client.set_terminated(run.info.run_id, "FINISHED")
                 break
             except Exception as e:
                 print(traceback.format_exc())
                 client.set_tag(run.info.run_id, "exception", str(e))
+                client.set_terminated(run.info.run_id, "FAILED")
 
 
 if __name__ == "__main__":
@@ -584,6 +609,7 @@ if __name__ == "__main__":
     parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--log_dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
 
     args = parser.parse_args()
     print(args)
@@ -594,4 +620,5 @@ if __name__ == "__main__":
         args.dataset,
         args.run_name,
         args.log_dir,
+        args.seed,
     )

@@ -4,12 +4,11 @@ from datetime import datetime
 import os, sys
 import traceback
 
-sys.path.append(os.getcwd())
 
 import random
 import uuid
 from pathlib import Path
-from typing import Any, Iterable, Literal, get_args
+from typing import Any, Callable, Iterable, Literal, Optional, get_args
 from typing import get_args as t_get_args
 
 import mlflow
@@ -20,12 +19,19 @@ import pandas as pd
 import srlearn.base as srlearn_base
 import torch
 import torch_geometric.transforms as T
-from db_transformer.data import (
-    CTUDatasetName,
-    CTUDataset,
+
+from torchmetrics import (
+    Accuracy,
+    F1Score,
+    MeanAbsoluteError,
+    MeanSquaredError,
+    MeanSquaredLogError,
+    NormalizedRootMeanSquaredError,
+    R2Score,
+    AUROC,
 )
-from db_transformer.schema.columns import CategoricalColumnDef
-from db_transformer.schema.schema import ForeignKeyDef, Schema
+from lightning.pytorch import seed_everything
+
 from slugify import slugify
 from srlearn import Background
 from srlearn.base import FileSystem
@@ -34,10 +40,10 @@ from srlearn.rdn import BoostedRDNClassifier, BoostedRDNRegressor
 from srlearn.system_manager import BoostSRLFiles
 from tqdm.auto import tqdm
 
-
-random.seed(0)
-np.random.seed(0)
-torch.manual_seed(0)
+sys.path.append(os.getcwd())
+from db_transformer.data import CTUDatasetName, CTUDataset, TaskType
+from db_transformer.schema.columns import CategoricalColumnDef
+from db_transformer.schema.schema import ForeignKeyDef, Schema
 
 
 DEFAULT_DATASET_NAME: CTUDatasetName = "CORA"
@@ -309,9 +315,9 @@ class CustomFileSystem(FileSystem):
         self.files.TEST_DIR.mkdir(exist_ok=True)
 
 
-def wrap_class_with_custom_file_system(cls, dataset_name: str, target_value: str):
+def wrap_class_with_custom_file_system(dataset_name: str, target_value: str):
     # @wraps(cls)
-    class CustomTrainer(cls):
+    class CustomTrainer(BoostedRDNClassifier):
         def _check_params(self):
             super()._check_params()
             self.file_system = CustomFileSystem(dataset_name, target_value)
@@ -319,15 +325,44 @@ def wrap_class_with_custom_file_system(cls, dataset_name: str, target_value: str
     return CustomTrainer
 
 
-def run(dataset_name: str) -> dict[str, Any]:
+def get_metrics(
+    task_type: TaskType, num_classes: Optional[int] = None
+) -> dict[str, Callable[[np.ndarray, np.ndarray], float]]:
+    metrics = {}
+    if task_type == TaskType.CLASSIFICATION:
+        assert (
+            num_classes is not None
+        ), "num_classes is required to initialize metrics for classification task"
+        task = "binary" if num_classes == 2 else "multiclass"
+        metrics["acc"] = Accuracy(task=task, num_classes=num_classes, average="micro")
+        metrics["f1_micro"] = F1Score(task=task, num_classes=num_classes, average="micro")
+        metrics["f1_macro"] = F1Score(task=task, num_classes=num_classes, average="macro")
+        metrics["auroc"] = AUROC(task=task, num_classes=num_classes, average="macro")
+
+    elif task_type == TaskType.REGRESSION:
+        metrics["mae"] = MeanAbsoluteError()
+        metrics["mse"] = MeanSquaredError()
+        metrics["msle"] = MeanSquaredLogError()
+        metrics["nrmse"] = NormalizedRootMeanSquaredError(normalization="range")
+
+    else:
+        raise ValueError("unsupported task type")
+
+    return metrics
+
+
+def run(dataset_name: str, seed: int = RANDOM_SEED) -> dict[str, Any]:
     dataset = CTUDataset(dataset_name)
 
     schema = dataset.schema
     defaults = dataset.defaults
 
+    assert defaults.task == TaskType.CLASSIFICATION
+
     dfs = {n: t.df for n, t in dataset.db.table_dict.items()}
     data, _ = dataset.build_hetero_data()
 
+    seed_everything(seed)
     n_total = data[defaults.target_table].y.shape[0]
     data = T.RandomNodeSplit("train_rest", num_val=int(0.30 * n_total), num_test=0)(data)
 
@@ -357,74 +392,71 @@ def run(dataset_name: str) -> dict[str, Any]:
 
     assert len(target_values) >= 2
 
+    print(f"Target values: {target_values}")
+
+    metrics = get_metrics(defaults.task, num_classes=len(target_values))
+
+    for target_value in (progress := tqdm(target_values)):
+        progress.set_postfix(target=target_value)
+        train, test = build_dataset(
+            schema,
+            dfs,
+            target,
+            target_value,
+            train_mask,
+            val_mask,
+            all_values_to_idx=True,
+        )
+
+        target_train_series = dfs[defaults.target_table][defaults.target_column][
+            pd.Series(train_mask)
+        ]
+        train_mask_pos = target_train_series == target_value
+        order_indices_train = np.concatenate(
+            [np.where(train_mask_pos)[0], np.where(~train_mask_pos)[0]]
+        )
+
+        target_val_series = dfs[defaults.target_table][defaults.target_column][
+            pd.Series(val_mask)
+        ]
+        val_mask_pos = target_val_series == target_value
+        order_indices_val = np.concatenate(
+            [np.where(val_mask_pos)[0], np.where(~val_mask_pos)[0]]
+        )
+
+        bk = Background(modes=train.modes)
+
+        custom_trainer_cls = wrap_class_with_custom_file_system(dataset_name, target_value)
+
+        clf = custom_trainer_cls(
+            solver="SRLBoost",
+            background=bk,
+            target=get_fact_name(get_fact_def_for_target(*target, target_value, schema)),
+        )
+        clf.fit(train)
+
+        p = clf.predict_proba(train)
+        train_results_per_class[target_value] = p[np.argsort(order_indices_train)]
+
+        p = clf.predict_proba(test)
+        test_results_per_class[target_value] = p[np.argsort(order_indices_val)]
+
+        # pred = np.greater(p, clf.threshold_)
     if len(target_values) == 2:
-        target_values = [tv for tv in target_values if tv]
-        assert len(target_values) > 0
-        target_values = target_values[:1]
+        target_value = target_values[1]
 
-    with tqdm(target_values) as progress:
-        for target_value in progress:
-            progress.set_postfix(target=target_value)
-            train, test = build_dataset(
-                schema,
-                dfs,
-                target,
-                target_value,
-                train_mask,
-                val_mask,
-                all_values_to_idx=True,
-            )
-
-            target_train_series = dfs[defaults.target_table][defaults.target_column][
-                pd.Series(train_mask)
-            ]
-            train_mask_pos = target_train_series == target_value
-            order_indices_train = np.concatenate(
-                [np.where(train_mask_pos)[0], np.where(~train_mask_pos)[0]]
-            )
-
-            target_val_series = dfs[defaults.target_table][defaults.target_column][
-                pd.Series(val_mask)
-            ]
-            val_mask_pos = target_val_series == target_value
-            order_indices_val = np.concatenate(
-                [np.where(val_mask_pos)[0], np.where(~val_mask_pos)[0]]
-            )
-
-            bk = Background(modes=train.modes)
-
-            custom_trainer_cls = wrap_class_with_custom_file_system(
-                BoostedRDNClassifier, dataset_name, target_value
-            )
-
-            clf = custom_trainer_cls(
-                solver="SRLBoost",
-                background=bk,
-                target=get_fact_name(
-                    get_fact_def_for_target(*target, target_value, schema)
-                ),
-            )
-            clf.fit(train)
-
-            p = clf.predict_proba(train)
-            train_results_per_class[target_value] = p[np.argsort(order_indices_train)]
-
-            p = clf.predict_proba(test)
-            test_results_per_class[target_value] = p[np.argsort(order_indices_val)]
-
-            # pred = np.greater(p, clf.threshold_)
-
-    if len(target_values) == 1:
-        target_value = target_values[0]
-
-        y_true = (
+        y_true: pd.Series = (
             dfs[defaults.target_table][defaults.target_column] == target_value
-        ).to_numpy()
-        y_true_train = y_true[train_mask]
-        y_true_test = y_true[val_mask]
+        )
+        y_true_train = y_true[train_mask].astype(int).to_numpy()
+        y_true_test = y_true[val_mask].astype(int).to_numpy()
 
-        y_pred_train = np.greater(train_results_per_class[target_value], clf.threshold_)
-        y_pred_test = np.greater(test_results_per_class[target_value], clf.threshold_)
+        y_pred_train = np.greater(
+            train_results_per_class[target_value], clf.threshold_
+        ).astype(int)
+        y_pred_test = np.greater(
+            test_results_per_class[target_value], clf.threshold_
+        ).astype(int)
     else:
         cls_index = {value: i for i, value in enumerate(target_values)}
         y_true = (
@@ -436,17 +468,16 @@ def run(dataset_name: str) -> dict[str, Any]:
         y_pred_train = np.argmax(np.stack(list(train_results_per_class.values()), -1), -1)
         y_pred_test = np.argmax(np.stack(list(test_results_per_class.values()), -1), -1)
 
-    train_acc = np.mean(y_pred_train == y_true_train)
-    val_acc = np.mean(y_pred_test == y_true_test)
-
-    result = dict(
-        train_acc=train_acc,
-        val_acc=val_acc,
-        best_train_acc=train_acc,
-        best_val_acc=val_acc,
-    )
-    print(result)
-    return result
+    metrics_report = {}
+    for mname, metric in metrics.items():
+        metric_train = metric(
+            torch.from_numpy(y_pred_train), torch.from_numpy(y_true_train)
+        )
+        metric_test = metric(torch.from_numpy(y_pred_test), torch.from_numpy(y_true_test))
+        metrics_report[f"best_train_{mname}"] = metric_train
+        metrics_report[f"best_val_{mname}"] = metric_test
+    print(metrics_report)
+    return metrics_report
 
 
 def run_experiment(
@@ -457,9 +488,6 @@ def run_experiment(
     log_dir: str = None,
     random_seed: int = RANDOM_SEED,
 ):
-    random.seed(random_seed)
-    np.random.seed(random_seed)
-    torch.manual_seed(random_seed)
 
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name=experiment_name)
@@ -477,11 +505,12 @@ def run_experiment(
         mlflow.log_params(dict(dataset=dataset))
 
         try:
-            metrics = run(dataset)
+            metrics = run(dataset, random_seed)
             mlflow.log_metrics(metrics)
         except Exception as e:
             print(traceback.format_exc())
             mlflow.set_tag("exception", str(e))
+            mlflow.end_run("FAILED")
 
 
 if __name__ == "__main__":
@@ -495,8 +524,11 @@ if __name__ == "__main__":
     parser.add_argument("--experiment", type=str, default=DEFAULT_EXPERIMENT_NAME)
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--log_dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
 
     args = parser.parse_args()
+
+    # run(args.dataset)
     print(args)
 
     run_experiment(
@@ -505,4 +537,5 @@ if __name__ == "__main__":
         args.dataset,
         args.run_name,
         args.log_dir,
+        args.seed,
     )

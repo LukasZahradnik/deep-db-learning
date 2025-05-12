@@ -66,7 +66,7 @@ class MLFlowLoggerCallback(L.Callback):
         self,
         run_id: str,
         mlflow_client: Any,
-        ray_session: Any,
+        ray_session: Optional[Any] = None,
         metrics: Optional[List[str]] = None,
     ) -> None:
 
@@ -106,4 +106,5 @@ class MLFlowLoggerCallback(L.Callback):
 
         self.mlflow_client.log_batch(self.run_id, metrics=mlflow_metrics, synchronous=False)
 
-        self.ray_session.report(metric_dict)
+        if self.ray_session is not None:
+            self.ray_session.report(metric_dict)
