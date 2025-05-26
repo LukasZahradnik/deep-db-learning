@@ -14,6 +14,9 @@ sbatch -o logs/experiment_dbformer_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/
 sbatch -o logs/experiment_dbformer_basic_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_dbformer_basic.sh
 sbatch -o logs/experiment_dbformer_text_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_dbformer_text.sh
 sbatch -o logs/experiment_dbformer_time_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_dbformer_time.sh
+sbatch -o logs/experiment_dbformer_small_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_dbformer_small.sh
+sbatch -o logs/experiment_dbformer_medium_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_dbformer_medium.sh
+sbatch -o logs/experiment_dbformer_large_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_dbformer_large.sh
 ```
 
 ## TabTransfomer
@@ -58,5 +61,14 @@ sbatch -w n18 -o logs/experiment_cilp_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/r
 
 ## SRLBoost
 ```bash
-sbatch -o logs/experiment_srlboost_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_srlboost.sh
+sbatch -o logs/experiment_srlboost_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_srlboost.sh 42
+sbatch -o logs/experiment_srlboost_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_srlboost.sh 43
+sbatch -o logs/experiment_srlboost_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_srlboost.sh 44
+sbatch -o logs/experiment_srlboost_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_srlboost.sh 45
+sbatch -o logs/experiment_srlboost_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_srlboost.sh 46
+```
+
+## Small Models
+```bash
+sbatch -o logs/experiment_small_models_$(date '+%d-%m-%Y_%H:%M:%S').log scripts/rci/experiment_small_models.sh
 ```

@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=experiment-deep-db-srlboost
+#SBATCH --job-name=experiment-deep-db-dbformer-medium
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=4:00:00
-#SBATCH --array=0-18
+#SBATCH --time=16:00:00
+#SBATCH --array=0-34
 
 # datasets=('Accidents' 'Airline' 'Atherosclerosis' 'Basketball_women' 'Bupa' 'Carcinogenesis'
 #     'Chess' 'CiteSeer' 'ConsumerExpenditures' 'CORA' 'CraftBeer' 'Credit' 'cs' 'Dallas' 'DCG' 'Dunur'
@@ -44,12 +44,13 @@
 # )
 
 paper_datasets=(
-    'Accidents'  'Carcinogenesis'
-    'CraftBeer' 'Dallas' 'DCG'
-    'financial' 'imdb_ijs' 'Mondial' 'MuskSmall' 'mutagenesis'
-    'Pima' 'PremierLeague' 'PubMed_Diabetes'
-    'Same_gen' 'Toxicology' 
-    'tpcd' 'UW_std' 'voc' 'WebKP'
+    'Accidents' 'AdventureWorks2014' 'Basketball_men' 'Biodegradability' 'Carcinogenesis'
+    'classicmodels' 'ConsumerExpenditures' 'CraftBeer' 'Dallas' 'DCG'
+    'employee' 'financial' 'FNHK' 'GOSales' 'Grants'
+    'imdb_ijs' 'Mondial' 'MuskSmall' 'mutagenesis' 'northwind' 
+    'Pima' 'PremierLeague' 'PubMed_Diabetes' 'restbase' 'sakila' 
+    'SalesDB' 'Same_gen' 'Seznam' 'stats'  'Toxicology' 
+    'tpcd' 'Triazine' 'UW_std' 'voc' 'WebKP'
 )
 
 id="${SLURM_JOB_NAME}_${SLURM_ARRAY_JOB_ID}"
@@ -61,22 +62,15 @@ conda_env="relational-py"
 source "$(conda info --base)""/etc/profile.d/conda.sh"
 conda activate "$conda_env"
 
-ml Java/21.0.2 
-
 run_dir=logs/${id}
 mkdir -p ${run_dir}
 
 log_dir=${run_dir}/${dataset}
 mkdir -p ${log_dir}
 
-SEED=42
-if [ $# -gt 0 ]; then
-  SEED=$1
-fi
-
-python -u experiments/srlboost.py --dataset=${dataset} \
+python -u experiments/blueprint_mlflow.py --ray_address="local" --dataset=${dataset} \
     --experiment="pelesjak-deep-db-experiments-v3" --run_name=${id} --log_dir=${log_dir} \
-    --seed=${SEED}  &> "${log_dir}/run.log"
+    --seed=42 --num_samples=5 --model_type="transformer-medium" --num_cpus=${SLURM_CPUS_PER_TASK} &> "${log_dir}/run.log"
 
 
 
